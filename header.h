@@ -18,8 +18,8 @@
 #include <vector>
 #include <mmintrin.h>
 
-const float DATAVER = 1;
-const float MODELVER = 1;
+const float DATAVER = 1.3f;
+const float MODELVER = 1.3f;
 
 const bool EN_SHOW_SCHED = false;
 const bool EN_SHOW_GRID = false;
