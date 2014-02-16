@@ -14,7 +14,7 @@ struct Monitor {
     void print_header();    // output list header
     void show(float iter_time, double loss, float tr_rmse);     // output list
     void scan_tr(const Matrix<nr_id> &Tr);							// 计算nr_tr_srs
-    double calc_reg();      // calculate ||PQ[i]|| * lambda
+    double calc_reg();      // calculate ||P[i]|| * lambda
     ~Monitor();
 };
 
@@ -68,7 +68,7 @@ double Monitor<nr_id>::calc_reg() {
     for(int i = 0; i < nr_id; ++i) {
         reg = 0;
         for(int j = 0; j < model->nr_s[i]; ++j)
-            reg += nr_tr_srs[i][j] * std::inner_product(&model->PQ[i][j * model->dim_off], &model->PQ[i][j * model->dim_off] + model->dim, &model->PQ[i][j * model->dim_off], 0.0);
+            reg += nr_tr_srs[i][j] * std::inner_product(&model->P[i][j * model->dim_off], &model->P[i][j * model->dim_off] + model->dim, &model->P[i][j * model->dim_off], 0.0);
         result += reg * model->l[i];
     }
     return result;
@@ -95,7 +95,7 @@ struct TrainOption {
 
 template<int nr_id>
 TrainOption<nr_id>::TrainOption(int argc, char **argv, Model<nr_id> *model, Monitor<nr_id> *monitor) : va_path(NULL), tr_path(NULL), model_path(NULL) {
-    model->dim = 40;	// 预设值
+    model->dim = 4;	// 预设值
     model->nr_thrs = 4;
     model->iter = 40;
     model->gamma = 0.001f;
@@ -110,6 +110,7 @@ TrainOption<nr_id>::TrainOption(int argc, char **argv, Model<nr_id> *model, Moni
         model->lb[i] = 1;
         model->en_b[i] = true;
     }
+    memset(model->en_sim, true, (1 + nr_id) * nr_id / 2 * sizeof(bool));
     int i;
     for(i = 2; i < argc; i++) {
         if(argv[i][0] != '-') break;
@@ -252,16 +253,20 @@ TrainOption<nr_id>::~TrainOption() {
 template<int nr_id>
 struct GridMatrix {
     int nr_gbs[nr_id],  // number of block for each dimension
-        nr_gbs_a;           // total blocks
+        nr_gbs_a,           // total blocks
+        seg[nr_id];
     long nr_rs;         // number of ratings
     Matrix<nr_id> **GMS;// grid matrix
-    GridMatrix(const Matrix<nr_id> &R, int **map, int *nr_gbs, int nr_thrs);
+    std::unordered_map<ArrayIndex<int, 2>, float, Arrayhash<ArrayIndex<int, 2>>, Arrayequal<ArrayIndex<int, 2>>> *sim[(1 + nr_id)*nr_id / 2];
+    //float *sim_avg[(1 + nr_id)*nr_id / 2];
+    float sim_avg[(1 + nr_id)*nr_id / 2];
+    GridMatrix(const Matrix<nr_id> &R, const Similarity<nr_id> &S, int **map, int *nr_gbs, int nr_thrs);
     static void sort_ratings(Matrix<nr_id> *R, std::mutex *mtx, int *nr_thrs);
     ~GridMatrix();
 };
 
 template<int nr_id>
-GridMatrix<nr_id>::GridMatrix(const Matrix<nr_id> &R, int **map, int *_nr_gbs, int nr_thrs) {
+GridMatrix<nr_id>::GridMatrix(const Matrix<nr_id> &R, const Similarity<nr_id> &S, int **map, int *_nr_gbs, int nr_thrs) {
     printf("Griding...");
     fflush(stdout);
     Clock clock;
@@ -277,12 +282,13 @@ GridMatrix<nr_id>::GridMatrix(const Matrix<nr_id> &R, int **map, int *_nr_gbs, i
     GMS = new Matrix<nr_id>*[nr_gbs_a];
     nr_rs = R.nr_rs;
     std::mutex mtx;
-    int seg[nr_id];
+
+    // assign counts for blocks
     for(int i = 0; i < nr_id; ++i) {
         seg[i] = (int)ceil(double(R.nr_s[i]) / nr_gbs[i]);
     }
 
-    // r_map to collect record number for each blocks
+    // r_map to collect record count for each blocks
     int *r_map = new int[nr_gbs_a];
     memset(r_map, 0, nr_gbs_a * sizeof(int));
     for(int i = 0, idx = 0; i < R.nr_rs; ++i, idx = 0) {
@@ -293,13 +299,60 @@ GridMatrix<nr_id>::GridMatrix(const Matrix<nr_id> &R, int **map, int *_nr_gbs, i
         ++r_map[idx];
     }
 
-    // create gird matrix and clear r_map
+    // set grid similarity
+    int num_avg[(1 + nr_id)*nr_id / 2];
+    for(int i = 0, ij = 0; i < nr_id; ++i) {
+        for(int j = 0; j <= i; ++j, ++ij) {
+            sim[ij] = new std::unordered_map<ArrayIndex<int, 2>, float, Arrayhash<ArrayIndex<int, 2>>, Arrayequal<ArrayIndex<int, 2>>>[nr_gbs[i] * nr_gbs[j]];
+            sim_avg[ij] = 0.0f;
+            num_avg[ij] = 0;
+            //sim_avg[ij] = new float[nr_gbs[i] * nr_gbs[j]];
+            //memset(sim_avg[ij], 0, nr_gbs[i] * nr_gbs[j] * sizeof(float));
+        }
+    }
+
+    ArrayIndex<int, 2> ai;
+    for(int i = 0, ij = 0, blkNum; i < nr_id; ++i) {
+        for(int j = 0; j <= i; ++j, ++ij) {
+            for(auto it = S.M[ij].begin(); it != S.M[ij].end(); ++it) {
+                ai.id[0] = it->id[0];
+                ai.id[1] = it->id[1];
+                blkNum = ai.id[0] / seg[i] * nr_gbs[j] + ai.id[1] / seg[j];
+                sim[ij][blkNum][ai] = it->rate;
+                sim_avg[ij] += it->rate;
+                ++num_avg[ij];
+                //sim_avg[ij][blkNum] += it->rate;
+            }
+        }
+    }
+
+    //// get average similarity
+    //for(int i = 0, ij = 0; i < nr_id; ++i) {
+    //    for(int j = 0; j <= i; ++j, ++ij) {
+    //        for(int blk = 0, nr; blk < nr_gbs[i] * nr_gbs[j]; ++blk) {
+    //            nr = sim[ij][blk].size();
+    //            if(nr > 0) {
+    //                sim_avg[ij][blk] /= nr;
+    //            }
+    //        }
+    //    }
+    //}
+
+    for(int i = 0, ij = 0; i < nr_id; ++i) {
+        for(int j = 0; j <= i; ++j, ++ij) {
+            if(num_avg[ij] > 0) {
+                sim_avg[ij] /= num_avg[ij];
+            }
+        }
+    }
+
+// create gird matrix and clear r_map
     for(int i = 0; i < nr_gbs_a; ++i) {
-        GMS[i] = new Matrix<nr_id>(r_map[i], R.nr_s, 0);	// GMS[i] 第i块的Matrix
+        GMS[i] = new Matrix<nr_id>(r_map[i], R.nr_s, R.avg);	// GMS[i] 第i块的Matrix
         r_map[i] = 0;									    // r_map: 各块中的元素个数
     }
 
-    // assign value to grid matrix
+// assign value to grid matrix
     int new_id[nr_id];  // store mapped node
     for(int i = 0, idx = 0; i < R.nr_rs; ++i, idx = 0) {
         for(int j = 0; j < nr_id; ++j) {
@@ -316,36 +369,39 @@ GridMatrix<nr_id>::GridMatrix(const Matrix<nr_id> &R, int **map, int *_nr_gbs, i
     }
     delete[] r_map;
 
-    // sort ratings for each grid if it is shuffled
-    if(map[0]) {
-        int nr_alive_thrs = 0;
-        for(int i = 0; i < nr_gbs_a; ++i) {
-            while(nr_alive_thrs >= nr_thrs) {
-                std::this_thread::sleep_for(std::chrono::milliseconds(1));
-                continue;
-            }
-            {
-                std::lock_guard<std::mutex> lock(mtx);
-                nr_alive_thrs++;
-            }
-            std::thread worker = std::thread(GridMatrix::sort_ratings, GMS[i], &mtx, &nr_alive_thrs);
-            worker.detach();
-        }
-        while(nr_alive_thrs != 0) {
-            std::this_thread::sleep_for(std::chrono::milliseconds(1));
-            continue;
-        }
-    }
+// sort ratings for each grid if it is shuffled (multi thread)
+    //if(map[0]) {
+    //    int nr_alive_thrs = 0;
+    //    for(int i = 0; i < nr_gbs_a; ++i) {
+    //        while(nr_alive_thrs >= nr_thrs) {
+    //            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    //            continue;
+    //        }
+    //        {
+    //            std::lock_guard<std::mutex> lock(mtx);
+    //            nr_alive_thrs++;
+    //        }
+    //        std::thread worker = std::thread(GridMatrix::sort_ratings, GMS[i], &mtx, &nr_alive_thrs);
+    //        worker.detach();
+    //    }
+    //    while(nr_alive_thrs != 0) {
+    //        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    //        continue;
+    //    }
+    //}
+
+
+
     printf("done. %.2f\n", clock.toc());
     fflush(stdout);
-    //if(EN_SHOW_GRID) {    // cannot show grid in multidimension
-    //printf("\n");
-    //for(int mx = 0; mx < nr_gubs; mx++) {
-    //for(int nx = 0; nx < nr_gibs; nx++) printf("%7ld ", GMS[mx * nr_gibs + nx]->nr_rs);
-    //printf("\n");
-    //}
-    //printf("\n");
-    //}
+//if(EN_SHOW_GRID) {    // cannot show grid in multidimension
+//printf("\n");
+//for(int mx = 0; mx < nr_gubs; mx++) {
+//for(int nx = 0; nx < nr_gibs; nx++) printf("%7ld ", GMS[mx * nr_gibs + nx]->nr_rs);
+//printf("\n");
+//}
+//printf("\n");
+//}
 }
 
 // multithread
@@ -362,6 +418,13 @@ GridMatrix<nr_id>::~GridMatrix() {
         for(int i = 0; i < nr_gbs_a; ++i)delete GMS[i];
         delete[] GMS;
         GMS = NULL;
+    }
+
+    for(int i = 0, ij = 0; i < nr_id; ++i) {
+        for(int j = 0; j <= i; ++j, ++ij) {
+            delete[] sim[ij];
+            //delete[] sim_avg[ij];
+        }
     }
 }
 
@@ -547,143 +610,659 @@ Scheduler<nr_id>::~Scheduler() {
 
 template<int nr_id>
 void sgd(GridMatrix<nr_id> *TrG, Model<nr_id> *model, Scheduler<nr_id> *scheduler, int tid) {
-    // copy from model: PQ, B, dim, en_b
-    // copy from TrG: nr_rs, rn,
-    float **PQ = new float*[nr_id];
-    float **B = new float*[nr_id];
-    for(int i = 0; i < nr_id; ++i) {
-        PQ[i] = model->PQ[i];
-        B[i] = model->B[i];
-    }
+    float *P[nr_id];
+    float *B[nr_id];
+    memcpy(P, model->P, nr_id * sizeof(float*));
+    memcpy(B, model->B, nr_id * sizeof(float*));
+
     const int dim = model->dim_off;
-    Node<nr_id> *r = NULL, *rn = NULL;
-    float **pq = new float*[nr_id];
-    float **b = new float*[nr_id];
-    bool *en_b = new bool[nr_id];
-    for(int i = 0; i < nr_id; ++i) {
-        pq[i] = NULL;
-        b[i] = NULL;
-        en_b[i] = model->en_b[i];
-    }
+    Node<nr_id> *r1 = NULL, *r2 = NULL;
+    float *p1[nr_id];
+    float *p2[nr_id];
+    float b1[nr_id];
+    float b2[nr_id];
+    bool en_b[nr_id];
+    memcpy(en_b, model->en_b, nr_id * sizeof(bool));
+    bool en_sim[(1 + nr_id) * nr_id / 2];
+    memcpy(en_sim, model->en_sim, (1 + nr_id) * nr_id / 2 * sizeof(bool));
     int dx, jid;
     long mx, nr_rs;
-    double loss;
-    __m128 XMMgl[nr_id];
-    for(int i = 0; i < nr_id; ++i) {
-        XMMgl[i] = _mm_load1_ps(&model->gl[i]);
-    }
-    __m128 XMMg = _mm_load1_ps(&model->gamma);
-    __m128 XMMavg = _mm_load1_ps(&model->avg);
-    __m128d XMMl = _mm_setzero_pd();
+    double loss = 0;
+
+    //__m128 XMMgl[nr_id];
+    //for(int i = 0; i < nr_id; ++i) {
+    //    XMMgl[i] = _mm_load1_ps(&model->gl[i]);
+    //}
+
+    float gammap = model->gamma;
+    float gammab = model->gamma;
+    //float gamma2p = model->gamma * 2;
+    //float gamma2b = model->gamma * 2;
+    //__m128 XMMg2p = _mm_load1_ps(&gamma2p);
+    //__m128 XMMg2b = _mm_load1_ps(&gamma2b);
+    //__m128 XMMavg = _mm_load1_ps(&model->avg);
+    float avg = model->avg;
+    //__m128d XMMl;// = _mm_setzero_pd();
+
+    //// get lambda form model
+    //__m128 XMMlambda2[(1 + nr_id) * nr_id / 2];
+    //for(int i = 0, ij = 0; i < nr_id; ++i) {
+    //    for(int j = 0; j <= i; ++j, ++ij) {
+    //        XMMlambda2[ij] = _mm_load1_ps(&model->lambda2[i]);
+    //    }
+    //}
+    float lambda2[(1 + nr_id) * nr_id / 2];
+    memcpy(lambda2, model->lambda2, sizeof(float*) * (1 + nr_id) * nr_id / 2);
+
+    float lambda3[nr_id];
+    memcpy(lambda3, model->lambda3, sizeof(float*) * nr_id);
+
+    float lambda4[(1 + nr_id) * nr_id / 2];
+    memcpy(lambda4, model->lambda4, sizeof(float*) * (1 + nr_id) * nr_id / 2);
+
+    float lambda5[nr_id];
+    memcpy(lambda5, model->lambda5, sizeof(float*)* nr_id);
+
+    //__m128 XMMlambda3[nr_id];
+    //for(int i = 0; i < nr_id; ++i) {
+    //    XMMlambda3[i] = _mm_load1_ps(&model->lambda3[i]);
+    //}
+
+    //for(int i = 0; i < nr_id; ++i) {
+    //    XMMgl[i] = _mm_load1_ps(&model->gl[i]);
+    //}
+    std::unordered_map<ArrayIndex<int, 2>, float, Arrayhash<ArrayIndex<int, 2>>, Arrayequal<ArrayIndex<int, 2>>> *pHash[(1 + nr_id)*nr_id / 2];
+
     while(true) {
         jid = scheduler->get_job();
-        rn = TrG->GMS[jid]->M;
+        r1 = TrG->GMS[jid]->M;
         nr_rs = TrG->GMS[jid]->nr_rs;
-        XMMl = _mm_setzero_pd();
-        for(mx = 0; mx < nr_rs; mx++) {						// 每次更新一个分数记录: PQ[id[0~(nr_id-1)]], loss
-            r = rn;
-            rn++;
-            __m128 XMMr = _mm_load1_ps(&r->rate), XMMge = _mm_setzero_ps();
+        __m128d XMMl = _mm_setzero_pd();
+
+        for(int i = 0, ij = 0; i < nr_id; ++i) {
+            for(int j = 0; j <= i; ++j, ++ij) {
+                pHash[ij] = &TrG->sim[ij][jid];
+            }
+        }
+
+        for(mx = 0; mx < nr_rs - 1; mx += 2, r1 += 2) {						// 每次更新一个分数记录: P[id[0~(nr_id-1)]], loss
+            r2 = r1 + 1;
+            //__m128 XMMr1 = _mm_load1_ps(&r1->rate);
+            //__m128 XMMr2 = _mm_load1_ps(&r2->rate);
+            __m128 XMMpsum1 = _mm_setzero_ps();
+            __m128 XMMpsum2 = _mm_setzero_ps();
+            //__m128 XMMe1 = _mm_setzero_ps();
+            //__m128 XMMe2 = _mm_setzero_ps();
+            //__m128 XMMf[nr_id][nr_id];
             for(int i = 0; i < nr_id; ++i) {
-                pq[i] = PQ[i] + r->id[i] * dim;
-                b[i] = B[i] + r->id[i];
+                p1[i] = P[i] + r1->id[i] * dim;
+                b1[i] = *(B[i] + r1->id[i]);
+                p2[i] = P[i] + r2->id[i] * dim;
+                b2[i] = *(B[i] + r2->id[i]);
             }
-            _mm_prefetch((const char *)(r), _MM_HINT_T0);
-            for(int i = 0; i < nr_id; ++i) {
-                _mm_prefetch((const char *)(pq[i]), _MM_HINT_T0);
-            }
-            if(mx + 7 < nr_rs) {
-                _mm_prefetch((const char *)(r + 7), _MM_HINT_T1);
-                for(int i = 0; i < nr_id; ++i) {
-                    _mm_prefetch((const char *)(PQ[i] + (r + 7)->id[i] * dim), _MM_HINT_T1);
-                }
-                if(mx + 15 < nr_rs) {
-                    _mm_prefetch((const char *)(r + 15), _MM_HINT_T2);
-                    for(int i = 0; i < nr_id; ++i) {
-                        _mm_prefetch((const char *)(PQ[i] + (r + 15)->id[i] * dim), _MM_HINT_T2);
-                    }
-                }
-            }
+            //_mm_prefetch((const char *)(r), _MM_HINT_T0);
+            //for(int i = 0; i < nr_id; ++i) {
+            //    _mm_prefetch((const char *)(pq[i]), _MM_HINT_T0);
+            //}
+            //if(mx + 7 < nr_rs) {
+            //    _mm_prefetch((const char *)(r + 7), _MM_HINT_T1);
+            //    for(int i = 0; i < nr_id; ++i) {
+            //        _mm_prefetch((const char *)(P[i] + (r + 7)->id[i] * dim), _MM_HINT_T1);
+            //    }
+            //    if(mx + 15 < nr_rs) {
+            //        _mm_prefetch((const char *)(r + 15), _MM_HINT_T2);
+            //        for(int i = 0; i < nr_id; ++i) {
+            //            _mm_prefetch((const char *)(P[i] + (r + 15)->id[i] * dim), _MM_HINT_T2);
+            //        }
+            //    }
+            //}
 
             // TODO: ???????????l += sum((Qij - pq[i]^2 - b[i] - b[j] - avgx)^2)
             // TODO: ???????????l += sum((pq[i]^2) + sum(b[i]^2)
 
-            for(int i = 0; i < nr_id; ++i) {					// ge += sum(pqi * pqj)
+            for(int i = 0; i < nr_id; ++i) {					// (pqi * pqj)
                 for(int j = i + 1; j < nr_id; ++j) {
                     for(dx = 0; dx < dim - 7; dx += 8) {
-                        __m128 XMMp0 = _mm_loadu_ps(pq[i] + dx);
-                        __m128 XMMq0 = _mm_loadu_ps(pq[j] + dx);
-                        __m128 XMMp1 = _mm_loadu_ps(pq[i] + dx + 4);
-                        __m128 XMMq1 = _mm_loadu_ps(pq[j] + dx + 4);
-                        XMMp0 = _mm_mul_ps(XMMp0, XMMq0);
-                        XMMp1 = _mm_mul_ps(XMMp1, XMMq1);
-                        XMMge = _mm_add_ps(XMMge, _mm_add_ps(XMMp0, XMMp1));
+                        __m128 XMMp11 = _mm_loadu_ps(p1[i] + dx);
+                        __m128 XMMq11 = _mm_loadu_ps(p1[j] + dx);
+                        __m128 XMMp12 = _mm_loadu_ps(p1[i] + dx + 4);
+                        __m128 XMMq12 = _mm_loadu_ps(p1[j] + dx + 4);
+                        __m128 XMMp21 = _mm_loadu_ps(p2[i] + dx);
+                        __m128 XMMq21 = _mm_loadu_ps(p2[j] + dx);
+                        __m128 XMMp22 = _mm_loadu_ps(p2[i] + dx + 4);
+                        __m128 XMMq22 = _mm_loadu_ps(p2[j] + dx + 4);
+                        XMMp11 = _mm_mul_ps(XMMp11, XMMq11);
+                        XMMp12 = _mm_mul_ps(XMMp12, XMMq12);
+                        XMMp21 = _mm_mul_ps(XMMp21, XMMq21);
+                        XMMp22 = _mm_mul_ps(XMMp22, XMMq22);
+                        //XMMe1 = _mm_add_ps(XMMe1, _mm_add_ps(XMMp11, XMMp12));
+                        //XMMe2 = _mm_add_ps(XMMe2, _mm_add_ps(XMMp21, XMMp22));
+                        XMMpsum1 = _mm_add_ps(XMMpsum1, _mm_add_ps(XMMp11, XMMp12));
+                        XMMpsum2 = _mm_add_ps(XMMpsum2, _mm_add_ps(XMMp21, XMMp22));
                     }
                     for(; dx < dim; dx += 4) {
-                        __m128 XMMp0 = _mm_loadu_ps(pq[i] + dx);
-                        __m128 XMMq0 = _mm_loadu_ps(pq[j] + dx);
-                        XMMge = _mm_add_ps(XMMge, _mm_mul_ps(XMMp0, XMMq0));
+                        __m128 XMMp1 = _mm_loadu_ps(p1[i] + dx);
+                        __m128 XMMq1 = _mm_loadu_ps(p1[j] + dx);
+                        __m128 XMMp2 = _mm_loadu_ps(p2[i] + dx);
+                        __m128 XMMq2 = _mm_loadu_ps(p2[j] + dx);
+                        //XMMe1 = _mm_add_ps(XMMe1, _mm_mul_ps(XMMp1, XMMq1));
+                        //XMMe2 = _mm_add_ps(XMMe2, _mm_mul_ps(XMMp2, XMMq2));
+                        XMMpsum1 = _mm_add_ps(XMMpsum1, _mm_mul_ps(XMMp1, XMMq1));
+                        XMMpsum2 = _mm_add_ps(XMMpsum2, _mm_mul_ps(XMMp2, XMMq2));
                     }
                 }
             }
-            XMMge = _mm_hadd_ps(XMMge, XMMge);
-            XMMge = _mm_hadd_ps(XMMge, XMMge);
+            //XMMe1 = _mm_hadd_ps(XMMe1, XMMe1);
+            //XMMe1 = _mm_hadd_ps(XMMe1, XMMe1);
+            //XMMe2 = _mm_hadd_ps(XMMe2, XMMe2);
+            //XMMe2 = _mm_hadd_ps(XMMe2, XMMe2);
+            XMMpsum1 = _mm_hadd_ps(XMMpsum1, XMMpsum1);
+            XMMpsum1 = _mm_hadd_ps(XMMpsum1, XMMpsum1);
+            XMMpsum2 = _mm_hadd_ps(XMMpsum2, XMMpsum2);
+            XMMpsum2 = _mm_hadd_ps(XMMpsum2, XMMpsum2);
 
-            for(int i = 0; i < nr_id; ++i) {					// ge += sum(bias)
-                if(en_b[i])XMMge = _mm_add_ps(XMMge, _mm_load1_ps(b[i]));
+            float e1, e2;
+            _mm_store_ss(&e1, XMMpsum1);
+            _mm_store_ss(&e2, XMMpsum2);
+
+            for(int i = 0; i < nr_id; ++i) {					// e += sum(bias)
+                if(en_b[i]) {
+                    e1 += b1[i];
+                    e2 += b2[i];
+                }
             }
 
-            XMMge = _mm_sub_ps(XMMr, _mm_add_ps(XMMge, XMMavg));// ge = r - (ge + avg1)
-            XMMl = _mm_add_pd(XMMl, _mm_cvtps_pd(_mm_mul_ps(XMMge, XMMge))); // l += (double)(ge^2)
+            e1 = r1->rate - e1 - avg;
+            e2 = r2->rate - e2 - avg;
 
-            XMMge = _mm_mul_ps(XMMge, XMMg); // ge *= gamma
 
-            for(dx = 0; dx < dim - 7; dx += 8) {				// 更新：pqi = ge * (sum(pq) - pqi) + gli * pqi
-                __m128 XMMsum0 = _mm_setzero_ps();
-                __m128 XMMsum1 = _mm_setzero_ps();
-                for(int i = 0; i < nr_id; ++i) {
-                    XMMsum0 = _mm_add_ps(XMMsum0, _mm_loadu_ps(pq[i] + dx));
-                    XMMsum1 = _mm_add_ps(XMMsum1, _mm_loadu_ps(pq[i] + dx + 4));
+            // e = r - (sum(p) + sum(b) +avg1)
+            //XMMe1 = _mm_add_ps(XMMe1, XMMpsum1);                // e+= sum(p)
+            //XMMe2 = _mm_add_ps(XMMe2, XMMpsum2);
+
+            //for(int i = 0; i < nr_id; ++i) {					// e += sum(bias)
+            //    if(en_b[i]) {
+            //        XMMe1 = _mm_add_ps(XMMe1, _mm_load1_ps(b1[i]));
+            //        XMMe2 = _mm_add_ps(XMMe2, _mm_load1_ps(b2[i]));
+            //    }
+            //}
+
+            //XMMe1 = _mm_sub_ps(XMMr1, _mm_add_ps(XMMe1, XMMavg));// e = r - (e + avg1)
+            //XMMe2 = _mm_sub_ps(XMMr2, _mm_add_ps(XMMe2, XMMavg));// e = r - (e + avg1)
+
+
+            //double esum = e1 * e1 + e2 * e2;
+            loss += e1 * e1 + e2 * e2;
+            //XMMl = _mm_add_pd(XMMl, _mm_load1_pd(&esum)); // l += (double)(e^2)
+
+            float f[nr_id][nr_id];
+            // fxy=q-px*py-bx-by-avg2
+            for(int i = 0, ij = 0; i < nr_id; ++i) {
+                for(int j = 0; j <= i; ++j, ++ij) {
+                    if(!model->en_sim[ij]) {
+                        f[i][j] = 0.0f;
+                        f[j][i] = 0.0f;
+                        continue;
+                    }
+                    ArrayIndex<int, 2> i1, i2;
+                    i1.id[0] = r1->id[i];
+                    i1.id[1] = r2->id[j];
+                    i2.id[0] = r2->id[i];
+                    i2.id[1] = r1->id[j];
+
+                    //float q1, q2;
+
+                    auto it1 = pHash[ij]->find(i1);
+                    if(it1 == pHash[ij]->end() && (i != j || i1.id[0] != i1.id[1])) {
+                        f[i][j] = 0.0f;
+                    } else {
+                        if(i != j || i1.id[0] != i1.id[1]) {
+                            f[i][j] = it1->second - TrG->sim_avg[ij];
+                        } else {
+                            f[i][j] = 1.0f - TrG->sim_avg[ij];
+                        }
+                        __m128 XMMcross = _mm_setzero_ps();
+                        for(dx = 0; dx < dim - 7; dx += 8) {
+                            __m128 XMMp0 = _mm_loadu_ps(p1[i] + dx);
+                            __m128 XMMp1 = _mm_loadu_ps(p1[i] + dx + 4);
+                            __m128 XMMq0 = _mm_loadu_ps(p2[j] + dx);
+                            __m128 XMMq1 = _mm_loadu_ps(p2[j] + dx + 4);
+                            XMMp0 = _mm_mul_ps(XMMp0, XMMq0);
+                            XMMp1 = _mm_mul_ps(XMMp1, XMMq1);
+                            XMMcross = _mm_add_ps(XMMp0, XMMp1);
+                        }
+                        for(; dx < dim; dx += 4) {
+                            __m128 XMMp0 = _mm_loadu_ps(p1[i] + dx);
+                            __m128 XMMq0 = _mm_loadu_ps(p2[j] + dx);
+                            XMMcross = _mm_add_ps(XMMp0, XMMq0);
+                        }
+                        XMMcross = _mm_hadd_ps(XMMcross, XMMcross);
+                        XMMcross = _mm_hadd_ps(XMMcross, XMMcross);
+
+                        float pcross;
+                        _mm_store_ss(&pcross , XMMcross);
+                        f[i][j] -= pcross;
+
+                        if(en_b[i]) {
+                            f[i][j] -= b1[i];
+                        }
+                        if(en_b[j]) {
+                            f[i][j] -= b2[j];
+                        }
+
+                        //int indexi = i > j ? i : j;
+                        //int indexj = i < j ? i : j;
+                        //loss += lambda2[(indexi + 1) * indexi / 2 + indexj] * f[i][j] * f[i][j];
+                        loss += lambda2[ij] * f[i][j] * f[i][j];
+                    }
+
+                    if(i != j) {
+                        auto it2 = pHash[ij]->find(i2);
+                        if(it2 == pHash[ij]->end()) {
+                            f[j][i] = 0.0f;
+                        } else {
+                            f[j][i] = it2->second - TrG->sim_avg[ij];
+                            __m128 XMMcross = _mm_setzero_ps();
+                            for(dx = 0; dx < dim - 7; dx += 8) {
+                                __m128 XMMp0 = _mm_loadu_ps(p2[i] + dx);
+                                __m128 XMMp1 = _mm_loadu_ps(p2[i] + dx + 4);
+                                __m128 XMMq0 = _mm_loadu_ps(p1[j] + dx);
+                                __m128 XMMq1 = _mm_loadu_ps(p1[j] + dx + 4);
+                                XMMp0 = _mm_mul_ps(XMMp0, XMMq0);
+                                XMMp1 = _mm_mul_ps(XMMp1, XMMq1);
+                                XMMcross = _mm_sub_ps(XMMcross, _mm_add_ps(XMMp0, XMMp1));
+                            }
+                            for(; dx < dim; dx += 4) {
+                                __m128 XMMp0 = _mm_loadu_ps(p2[i] + dx);
+                                __m128 XMMq0 = _mm_loadu_ps(p1[j] + dx);
+                                XMMcross = _mm_sub_ps(XMMcross, _mm_add_ps(XMMp0, XMMq0));
+                            }
+                            XMMcross = _mm_hadd_ps(XMMcross, XMMcross);
+                            XMMcross = _mm_hadd_ps(XMMcross, XMMcross);
+
+                            if(en_b[j]) {
+                                f[j][i] -= b1[j];
+                            }
+                            if(en_b[i]) {
+                                f[j][i] -= b2[i];
+                            }
+                        }
+                        //int indexi = i > j ? i : j;
+                        //int indexj = i < j ? i : j;
+                        loss += lambda2[ij] * f[j][i] * f[j][i];
+                    }
                 }
+            }
+
+
+            //// fxy=q-px*py-bx-by-avg2
+            //float qzero = 0.0f;
+            //for(int i = 0, ij = 0; i < nr_id; ++i) {
+            //    for(int j = 0; j <= i; ++j, ++ij) {
+            //        if(!model->en_sim[ij]) {
+            //            XMMf[i][j] = _mm_load1_ps(&qzero);
+            //            XMMf[j][i] = _mm_load1_ps(&qzero);
+            //            continue;
+            //        }
+            //        ArrayIndex<int, 2> i1, i2;
+            //        i1.id[0] = r1->id[i];
+            //        i1.id[1] = r2->id[j];
+            //        i2.id[0] = r2->id[i];
+            //        i2.id[1] = r1->id[j];
+
+            //        float q1, q2;
+
+            //        auto it1 = pHash[ij]->find(i1);
+            //        if(it1 == pHash[ij]->end() && (i != j || i1.id[0] != i1.id[1])) {
+            //            XMMf[i][j] = _mm_load1_ps(&qzero);
+            //        } else {
+            //            if(i != j || i1.id[0] != i1.id[1]) {
+            //                q1 = it1->second - TrG->sim_avg[ij];
+            //            } else {
+            //                q1 = 1.0f - TrG->sim_avg[ij];
+            //            }
+            //            XMMf[i][j] = _mm_load1_ps(&q1);
+            //            for(dx = 0; dx < dim - 7; dx += 8) {
+            //                __m128 XMMp0 = _mm_loadu_ps(p1[i] + dx);
+            //                __m128 XMMp1 = _mm_loadu_ps(p1[i] + dx + 4);
+            //                __m128 XMMq0 = _mm_loadu_ps(p2[j] + dx);
+            //                __m128 XMMq1 = _mm_loadu_ps(p2[j] + dx + 4);
+            //                XMMp0 = _mm_mul_ps(XMMp0, XMMq0);
+            //                XMMp1 = _mm_mul_ps(XMMp1, XMMq1);
+            //                XMMf[i][j] = _mm_sub_ps(XMMf[i][j], _mm_add_ps(XMMp0, XMMp1));
+            //            }
+            //            for(; dx < dim; dx += 4) {
+            //                __m128 XMMp0 = _mm_loadu_ps(p1[i] + dx);
+            //                __m128 XMMq0 = _mm_loadu_ps(p2[j] + dx);
+            //                XMMf[i][j] = _mm_sub_ps(XMMf[i][j], _mm_add_ps(XMMp0, XMMq0));
+            //            }
+            //            if(en_b[i]) {
+            //                XMMf[i][j] = _mm_sub_ps(XMMf[i][j], _mm_load1_ps(&b1[i]));
+            //            }
+            //            if(en_b[j]) {
+            //                XMMf[i][j] = _mm_sub_ps(XMMf[i][j], _mm_load1_ps(&b2[j]));
+            //            }
+
+            //            int indexi = i > j ? i : j;
+            //            int indexj = i < j ? i : j;
+            //            XMMl = _mm_add_pd(XMMl, _mm_cvtps_pd(_mm_mul_ps(XMMlambda2[(indexi + 1) * indexi / 2 + indexj], _mm_mul_ps(XMMf[i][j], XMMf[i][j])))); // l += lambda2*(f^2)
+            //        }
+
+            //        if(i != j) {
+            //            auto it2 = pHash[ij]->find(i2);
+            //            if(it2 == pHash[ij]->end()) {
+            //                XMMf[j][i] = _mm_load1_ps(&qzero);
+            //            } else {
+            //                q2 = it2->second - TrG->sim_avg[ij];
+            //                XMMf[j][i] = _mm_load1_ps(&q2);
+            //                for(dx = 0; dx < dim - 7; dx += 8) {
+            //                    __m128 XMMp0 = _mm_loadu_ps(p2[i] + dx);
+            //                    __m128 XMMp1 = _mm_loadu_ps(p2[i] + dx + 4);
+            //                    __m128 XMMq0 = _mm_loadu_ps(p1[j] + dx);
+            //                    __m128 XMMq1 = _mm_loadu_ps(p1[j] + dx + 4);
+            //                    XMMp0 = _mm_mul_ps(XMMp0, XMMq0);
+            //                    XMMp1 = _mm_mul_ps(XMMp1, XMMq1);
+            //                    XMMf[j][i] = _mm_sub_ps(XMMf[j][i], _mm_add_ps(XMMp0, XMMp1));
+            //                }
+            //                for(; dx < dim; dx += 4) {
+            //                    __m128 XMMp0 = _mm_loadu_ps(p2[i] + dx);
+            //                    __m128 XMMq0 = _mm_loadu_ps(p1[j] + dx);
+            //                    XMMf[j][i] = _mm_sub_ps(XMMf[j][i], _mm_add_ps(XMMp0, XMMq0));
+            //                }
+            //                if(en_b[j]) {
+            //                    XMMf[j][i] = _mm_sub_ps(XMMf[j][j], _mm_load1_ps(&b1[j]));
+            //                }
+            //                if(en_b[i]) {
+            //                    XMMf[j][i] = _mm_sub_ps(XMMf[j][i], _mm_load1_ps(&b2[i]));
+            //                }
+            //            }
+            //            int indexi = i > j ? i : j;
+            //            int indexj = i < j ? i : j;
+            //            XMMl = _mm_add_pd(XMMl, _mm_cvtps_pd(_mm_mul_ps(XMMlambda2[(indexi + 1) * indexi / 2 + indexj], _mm_mul_ps(XMMf[j][i], XMMf[j][i])))); // l += lambda2*(f^2)
+            //        }
+            //    }
+            //}
+
+            // update
+            float p1g2e = gammap * 2 * e1;
+            float p2g2e = gammap * 2 * e2;
+            for(dx = 0; dx < dim - 7; dx += 8) {
+                __m128 XMMsum10 = _mm_setzero_ps();  // sum(p1)
+                __m128 XMMsum11 = _mm_setzero_ps();
+                __m128 XMMsum20 = _mm_setzero_ps();  // sum(p2)
+                __m128 XMMsum21 = _mm_setzero_ps();
                 for(int i = 0; i < nr_id; ++i) {
-                    __m128 XMMpq0 = _mm_loadu_ps(pq[i] + dx);
-                    __m128 XMMpq1 = _mm_loadu_ps(pq[i] + dx + 4);
-                    XMMpq0 = _mm_add_ps(_mm_mul_ps(XMMge, _mm_sub_ps(XMMsum0, XMMpq0)), _mm_mul_ps(XMMgl[i], XMMpq0));
-                    XMMpq1 = _mm_add_ps(_mm_mul_ps(XMMge, _mm_sub_ps(XMMsum1, XMMpq1)), _mm_mul_ps(XMMgl[i], XMMpq1));
-                    _mm_storeu_ps(pq[i] + dx, XMMpq0);
-                    _mm_storeu_ps(pq[i] + dx + 4, XMMpq1);
+                    XMMsum10 = _mm_add_ps(XMMsum10, _mm_loadu_ps(p1[i] + dx));
+                    XMMsum11 = _mm_add_ps(XMMsum11, _mm_loadu_ps(p1[i] + dx + 4));
+                    XMMsum20 = _mm_add_ps(XMMsum20, _mm_loadu_ps(p2[i] + dx));
+                    XMMsum21 = _mm_add_ps(XMMsum21, _mm_loadu_ps(p2[i] + dx + 4));
+                }
+
+                for(int i = 0; i < nr_id; ++i) {
+                    float p1g2e1 = p1g2e + 1.0f + lambda3[i];
+                    float p2g2e1 = p2g2e + 1.0f + lambda3[i];
+                    __m128 XMMp10 = _mm_mul_ps(_mm_loadu_ps(p1[i] + dx), _mm_loadu_ps(&p1g2e1));
+                    __m128 XMMp11 = _mm_mul_ps(_mm_loadu_ps(p1[i] + dx + 4), _mm_loadu_ps(&p1g2e1));
+                    __m128 XMMp20 = _mm_mul_ps(_mm_loadu_ps(p2[i] + dx), _mm_loadu_ps(&p2g2e1));
+                    __m128 XMMp21 = _mm_mul_ps(_mm_loadu_ps(p2[i] + dx + 4), _mm_loadu_ps(&p2g2e1));
+
+                    XMMp10 = _mm_sub_ps(XMMp10, _mm_mul_ps(_mm_loadu_ps(&p1g2e), XMMsum10));
+                    XMMp11 = _mm_sub_ps(XMMp11, _mm_mul_ps(_mm_loadu_ps(&p1g2e), XMMsum11));
+                    XMMp20 = _mm_sub_ps(XMMp20, _mm_mul_ps(_mm_loadu_ps(&p2g2e), XMMsum20));
+                    XMMp21 = _mm_sub_ps(XMMp21, _mm_mul_ps(_mm_loadu_ps(&p2g2e), XMMsum21));
+
+                    for(int j = 0, ij; j < nr_id; ++j) {
+                        if(j < i)ij = (i + 1) * i / 2 + j;
+                        else ij = (j + 1) * j / 2 + i;
+                        if(f[i][j] != 0.0f) {
+                            float p1g2e2 = gammap * 2 * lambda2[ij] * f[i][j];
+                            XMMp10 = _mm_sub_ps(XMMp10, _mm_mul_ps(_mm_loadu_ps(&p1g2e2), _mm_loadu_ps(p2[j] + dx)));
+                            XMMp11 = _mm_sub_ps(XMMp11, _mm_mul_ps(_mm_loadu_ps(&p1g2e2), _mm_loadu_ps(p2[j] + dx + 4)));
+                        }
+                        if(f[j][i] != 0.0f) {
+                            float p2g2e2 = gammap * 2 * lambda2[ij] * f[j][i];
+                            XMMp20 = _mm_sub_ps(XMMp20, _mm_mul_ps(_mm_loadu_ps(&p2g2e2), _mm_loadu_ps(p1[j] + dx)));
+                            XMMp21 = _mm_sub_ps(XMMp21, _mm_mul_ps(_mm_loadu_ps(&p2g2e2), _mm_loadu_ps(p1[j] + dx + 4)));
+                        }
+                    }
+
+                    _mm_storeu_ps(p1[i] + dx, XMMp10);
+                    _mm_storeu_ps(p1[i] + dx + 4, XMMp11);
+                    _mm_storeu_ps(p2[i] + dx, XMMp20);
+                    _mm_storeu_ps(p2[i] + dx + 4, XMMp21);
                 }
             }
             for(; dx < dim; dx += 4) {
-                __m128 XMMsum0 = _mm_setzero_ps();
+                __m128 XMMsum10 = _mm_setzero_ps();  // sum(p1)
+                __m128 XMMsum20 = _mm_setzero_ps();  // sum(p2)
                 for(int i = 0; i < nr_id; ++i) {
-                    XMMsum0 = _mm_add_ps(XMMsum0, _mm_loadu_ps(pq[i] + dx));
+                    XMMsum10 = _mm_add_ps(XMMsum10, _mm_loadu_ps(p1[i] + dx));
+                    XMMsum20 = _mm_add_ps(XMMsum20, _mm_loadu_ps(p2[i] + dx));
                 }
+
                 for(int i = 0; i < nr_id; ++i) {
-                    __m128 XMMpq0 = _mm_loadu_ps(pq[i] + dx);
-                    XMMpq0 = _mm_add_ps(_mm_mul_ps(XMMge, _mm_sub_ps(XMMsum0, XMMpq0)), _mm_mul_ps(XMMgl[i], XMMpq0));
-                    _mm_storeu_ps(pq[i] + dx, XMMpq0);
+                    float p1g2e1 = p1g2e + 1.0f + lambda3[i];
+                    float p2g2e1 = p2g2e + 1.0f + lambda3[i];
+                    __m128 XMMp10 = _mm_mul_ps(_mm_loadu_ps(p1[i] + dx), _mm_loadu_ps(&p1g2e1));
+                    __m128 XMMp20 = _mm_mul_ps(_mm_loadu_ps(p2[i] + dx), _mm_loadu_ps(&p2g2e1));
+
+                    XMMp10 = _mm_sub_ps(XMMp10, _mm_mul_ps(_mm_loadu_ps(&p1g2e), XMMsum10));
+                    XMMp20 = _mm_sub_ps(XMMp20, _mm_mul_ps(_mm_loadu_ps(&p2g2e), XMMsum20));
+
+                    for(int j = 0, ij; j < nr_id; ++j) {
+                        if(j < i)ij = (i + 1) * i / 2 + j;
+                        else ij = (j + 1) * j / 2 + i;
+                        if(f[i][j] != 0.0f) {
+                            float p1g2e2 = gammap * 2 * lambda2[ij] * f[i][j];
+                            XMMp10 = _mm_sub_ps(XMMp10, _mm_mul_ps(_mm_loadu_ps(&p1g2e2), _mm_loadu_ps(p2[j] + dx)));
+                        }
+                        if(f[j][i] != 0.0f) {
+                            float p2g2e2 = gammap * 2 * lambda2[ij] * f[j][i];
+                            XMMp20 = _mm_sub_ps(XMMp20, _mm_mul_ps(_mm_loadu_ps(&p2g2e2), _mm_loadu_ps(p1[j] + dx)));
+                        }
+                    }
+
+                    _mm_storeu_ps(p1[i] + dx, XMMp10);
+                    _mm_storeu_ps(p2[i] + dx, XMMp20);
                 }
             }
+            //for(; dx < dim; dx += 4) {
+            //    __m128 XMMsum0 = _mm_setzero_ps();
+            //    for(int i = 0; i < nr_id; ++i) {
+            //        XMMsum0 = _mm_add_ps(XMMsum0, _mm_loadu_ps(p1[i] + dx));
+            //    }
 
-            float ge[4];
+            //    for(int i = 0; i < nr_id; ++i) {
+            //        __m128 _XMMp0 = _mm_loadu_ps(p1[i] + dx);
+            //        __m128 XMMp0 = _mm_mul_ps(_mm_sub_ps(_XMMp0, XMMsum0), XMMe1);
+            //        for(int j = 0; j < i; ++j) {
+            //            XMMp0 = _mm_sub_ps(XMMp0, _mm_mul_ps(XMMlambda2[(i + 1) * i / 2 + j], _mm_mul_ps(XMMf[i][j], _mm_loadu_ps(p2[j] + dx))));
+            //        }
+            //        for(int j = i; j < nr_id; ++j) {
+            //            XMMp0 = _mm_sub_ps(XMMp0, _mm_mul_ps(XMMlambda2[(j + 1) * j / 2 + i], _mm_mul_ps(XMMf[i][j], _mm_loadu_ps(p2[j] + dx))));
+            //        }
+            //        XMMp0 = _mm_add_ps(XMMp0, _mm_mul_ps(XMMlambda3[i], _XMMp0));
+            //        XMMp0 = _mm_add_ps(_XMMp0, _mm_mul_ps(XMMg2p, XMMp0));
+            //        _mm_storeu_ps(p1[i] + dx, XMMp0);
+            //    }
+            //}
+
+            //float ge[4];
             //float ge;
-            _mm_storeu_ps(ge, XMMge);
-            for(int i = 0; i < nr_id; ++i) {                    // 更新：b[i] = gl[i] * b[i] + ge;
-                if(en_b[i])(*b[i]) = model->gl[i] * (*b[i]) + ge[0];
+            //_mm_storeu_ps(ge, XMMge);
+            //for(int i = 0; i < nr_id; ++i) {                    // 更新：b[i] = gl[i] * b[i] + ge;
+            //if(en_b[i])(*b[i]) = model->gl[i] * (*b[i]) + ge[0];
+            //}
+            for(int i = 0; i < nr_id; ++i) {
+                if(en_b[i]) {
+                    float temp1 = 0, temp2 = 0;
+                    int ij = 0;
+                    for(int j = 0; j < nr_id; ++j, ++ij) {
+                        temp1 -= lambda4[ij] * f[i][j];
+                        temp2 -= lambda4[ij] * f[j][i];
+                    }
+                    b1[i] += gammab * 2 * (-e1 - temp1 + lambda5[i] * b1[i]);
+                    b2[i] += gammab * 2 * (-e2 - temp2 + lambda5[i] * b2[i]);
+                }
             }
         }
-        _mm_store_sd(&loss, XMMl);
+
+
+        //XMMge = _mm_mul_ps(XMMge, XMMg); // ge *= gamma
+
+        //for(dx = 0; dx < dim - 7; dx += 8) {				// 更新：pqi = ge * (sum(pq) - pqi) + gli * pqi
+        //    __m128 XMMsum0 = _mm_setzero_ps();
+        //    __m128 XMMsum1 = _mm_setzero_ps();
+        //    for(int i = 0; i < nr_id; ++i) {
+        //        XMMsum0 = _mm_add_ps(XMMsum0, _mm_loadu_ps(pq[i] + dx));
+        //        XMMsum1 = _mm_add_ps(XMMsum1, _mm_loadu_ps(pq[i] + dx + 4));
+        //    }
+        //    for(int i = 0; i < nr_id; ++i) {
+        //        __m128 XMMpq0 = _mm_loadu_ps(pq[i] + dx);
+        //        __m128 XMMpq1 = _mm_loadu_ps(pq[i] + dx + 4);
+        //        XMMpq0 = _mm_add_ps(_mm_mul_ps(XMMge, _mm_sub_ps(XMMsum0, XMMpq0)), _mm_mul_ps(XMMgl[i], XMMpq0));
+        //        XMMpq1 = _mm_add_ps(_mm_mul_ps(XMMge, _mm_sub_ps(XMMsum1, XMMpq1)), _mm_mul_ps(XMMgl[i], XMMpq1));
+        //        _mm_storeu_ps(pq[i] + dx, XMMpq0);
+        //        _mm_storeu_ps(pq[i] + dx + 4, XMMpq1);
+        //    }
+        //}
+        //for(; dx < dim; dx += 4) {
+        //    __m128 XMMsum0 = _mm_setzero_ps();
+        //    for(int i = 0; i < nr_id; ++i) {
+        //        XMMsum0 = _mm_add_ps(XMMsum0, _mm_loadu_ps(pq[i] + dx));
+        //    }
+        //    for(int i = 0; i < nr_id; ++i) {
+        //        __m128 XMMpq0 = _mm_loadu_ps(pq[i] + dx);
+        //        XMMpq0 = _mm_add_ps(_mm_mul_ps(XMMge, _mm_sub_ps(XMMsum0, XMMpq0)), _mm_mul_ps(XMMgl[i], XMMpq0));
+        //        _mm_storeu_ps(pq[i] + dx, XMMpq0);
+        //    }
+        //}
+
+        //float ge[4];
+        ////float ge;
+        //_mm_storeu_ps(ge, XMMge);
+        //for(int i = 0; i < nr_id; ++i) {                    // 更新：b[i] = gl[i] * b[i] + ge;
+        //    if(en_b[i])(*b[i]) = model->gl[i] * (*b[i]) + ge[0];
+        //}
+        //}
+        //_mm_store_sd(&loss, XMMl);
         scheduler->put_job(jid, loss);
         scheduler->pause();
         if(scheduler->is_terminated()) break;
     }
-    delete[] PQ;
-    delete[] B;
-    delete[] pq;
-    delete[] b;
-    delete[] en_b;
 }
+
+//while(true) {
+//    jid = scheduler->get_job();
+//    rn = TrG->GMS[jid]->M;
+//    nr_rs = TrG->GMS[jid]->nr_rs;
+//    XMMl = _mm_setzero_pd();
+//    for(mx = 0; mx < nr_rs; mx++) {						// 每次更新一个分数记录: P[id[0~(nr_id-1)]], loss
+//        r = rn;
+//        rn++;
+//        __m128 XMMr = _mm_load1_ps(&r->rate), XMMge = _mm_setzero_ps();
+//        for(int i = 0; i < nr_id; ++i) {
+//            pq[i] = P[i] + r->id[i] * dim;
+//            b[i] = B[i] + r->id[i];
+//        }
+//        //_mm_prefetch((const char *)(r), _MM_HINT_T0);
+//        //for(int i = 0; i < nr_id; ++i) {
+//        //    _mm_prefetch((const char *)(pq[i]), _MM_HINT_T0);
+//        //}
+//        //if(mx + 7 < nr_rs) {
+//        //    _mm_prefetch((const char *)(r + 7), _MM_HINT_T1);
+//        //    for(int i = 0; i < nr_id; ++i) {
+//        //        _mm_prefetch((const char *)(P[i] + (r + 7)->id[i] * dim), _MM_HINT_T1);
+//        //    }
+//        //    if(mx + 15 < nr_rs) {
+//        //        _mm_prefetch((const char *)(r + 15), _MM_HINT_T2);
+//        //        for(int i = 0; i < nr_id; ++i) {
+//        //            _mm_prefetch((const char *)(P[i] + (r + 15)->id[i] * dim), _MM_HINT_T2);
+//        //        }
+//        //    }
+//        //}
+
+//        // TODO: ???????????l += sum((Qij - pq[i]^2 - b[i] - b[j] - avgx)^2)
+//        // TODO: ???????????l += sum((pq[i]^2) + sum(b[i]^2)
+
+//        for(int i = 0; i < nr_id; ++i) {					// ge += sum(pqi * pqj)
+//            for(int j = i + 1; j < nr_id; ++j) {
+//                for(dx = 0; dx < dim - 7; dx += 8) {
+//                    __m128 XMMp0 = _mm_loadu_ps(pq[i] + dx);
+//                    __m128 XMMq0 = _mm_loadu_ps(pq[j] + dx);
+//                    __m128 XMMp1 = _mm_loadu_ps(pq[i] + dx + 4);
+//                    __m128 XMMq1 = _mm_loadu_ps(pq[j] + dx + 4);
+//                    XMMp0 = _mm_mul_ps(XMMp0, XMMq0);
+//                    XMMp1 = _mm_mul_ps(XMMp1, XMMq1);
+//                    XMMge = _mm_add_ps(XMMge, _mm_add_ps(XMMp0, XMMp1));
+//                }
+//                for(; dx < dim; dx += 4) {
+//                    __m128 XMMp0 = _mm_loadu_ps(pq[i] + dx);
+//                    __m128 XMMq0 = _mm_loadu_ps(pq[j] + dx);
+//                    XMMge = _mm_add_ps(XMMge, _mm_mul_ps(XMMp0, XMMq0));
+//                }
+//            }
+//        }
+//        XMMge = _mm_hadd_ps(XMMge, XMMge);
+//        XMMge = _mm_hadd_ps(XMMge, XMMge);
+
+//        for(int i = 0; i < nr_id; ++i) {					// ge += sum(bias)
+//            if(en_b[i])XMMge = _mm_add_ps(XMMge, _mm_load1_ps(b[i]));
+//        }
+
+//        XMMge = _mm_sub_ps(XMMr, _mm_add_ps(XMMge, XMMavg));// ge = r - (ge + avg1)
+//        XMMl = _mm_add_pd(XMMl, _mm_cvtps_pd(_mm_mul_ps(XMMge, XMMge))); // l += (double)(ge^2)
+
+//        XMMge = _mm_mul_ps(XMMge, XMMg); // ge *= gamma
+
+//        for(dx = 0; dx < dim - 7; dx += 8) {				// 更新：pqi = ge * (sum(pq) - pqi) + gli * pqi
+//            __m128 XMMsum0 = _mm_setzero_ps();
+//            __m128 XMMsum1 = _mm_setzero_ps();
+//            for(int i = 0; i < nr_id; ++i) {
+//                XMMsum0 = _mm_add_ps(XMMsum0, _mm_loadu_ps(pq[i] + dx));
+//                XMMsum1 = _mm_add_ps(XMMsum1, _mm_loadu_ps(pq[i] + dx + 4));
+//            }
+//            for(int i = 0; i < nr_id; ++i) {
+//                __m128 XMMpq0 = _mm_loadu_ps(pq[i] + dx);
+//                __m128 XMMpq1 = _mm_loadu_ps(pq[i] + dx + 4);
+//                XMMpq0 = _mm_add_ps(_mm_mul_ps(XMMge, _mm_sub_ps(XMMsum0, XMMpq0)), _mm_mul_ps(XMMgl[i], XMMpq0));
+//                XMMpq1 = _mm_add_ps(_mm_mul_ps(XMMge, _mm_sub_ps(XMMsum1, XMMpq1)), _mm_mul_ps(XMMgl[i], XMMpq1));
+//                _mm_storeu_ps(pq[i] + dx, XMMpq0);
+//                _mm_storeu_ps(pq[i] + dx + 4, XMMpq1);
+//            }
+//        }
+//        for(; dx < dim; dx += 4) {
+//            __m128 XMMsum0 = _mm_setzero_ps();
+//            for(int i = 0; i < nr_id; ++i) {
+//                XMMsum0 = _mm_add_ps(XMMsum0, _mm_loadu_ps(pq[i] + dx));
+//            }
+//            for(int i = 0; i < nr_id; ++i) {
+//                __m128 XMMpq0 = _mm_loadu_ps(pq[i] + dx);
+//                XMMpq0 = _mm_add_ps(_mm_mul_ps(XMMge, _mm_sub_ps(XMMsum0, XMMpq0)), _mm_mul_ps(XMMgl[i], XMMpq0));
+//                _mm_storeu_ps(pq[i] + dx, XMMpq0);
+//            }
+//        }
+
+//        float ge[4];
+//        //float ge;
+//        _mm_storeu_ps(ge, XMMge);
+//        for(int i = 0; i < nr_id; ++i) {                    // 更新：b[i] = gl[i] * b[i] + ge;
+//            if(en_b[i])(*b[i]) = model->gl[i] * (*b[i]) + ge[0];
+//        }
+//    }
+//    _mm_store_sd(&loss, XMMl);
+//    scheduler->put_job(jid, loss);
+//    scheduler->pause();
+//    if(scheduler->is_terminated()) break;
+//}
+//delete[] P;
+//delete[] B;
+//delete[] p1;
+//delete[] b1;
+//delete[] p2;
+//delete[] b2;
+//delete[] en_b;
+//}
 
 template<int nr_id>
 void gsgd(GridMatrix<nr_id> *TrG, Model<nr_id> *model, Monitor<nr_id> *monitor) {
@@ -728,22 +1307,24 @@ void gsgd(GridMatrix<nr_id> *TrG, Model<nr_id> *model, Monitor<nr_id> *monitor) 
 
 template<int nr_id>
 void train(int argc, char **argv) {
+    Similarity<nr_id> similarity;
+    similarity.generate(10000, 1000);
     // get options from argv
-    Model<nr_id> *model = new Model<nr_id>;
-    Monitor<nr_id> *monitor = new Monitor<nr_id>;
-    TrainOption<nr_id> *option = new TrainOption<nr_id>(argc, argv, model, monitor);
+    Model<nr_id> model;// = new Model<nr_id>;
+    Monitor<nr_id> monitor;// = new Monitor<nr_id>;
+    TrainOption<nr_id> option(argc, argv, &model, &monitor);
 
     // create model from train matrix
-    Matrix<nr_id> Tr(option->tr_path);
-    model->initialize(Tr);
-    if(model->en_rand_shuffle) model->gen_rand_map();
+    Matrix<nr_id> Tr(option.tr_path);
+    model.initialize(Tr);
+    if(model.en_rand_shuffle) model.gen_rand_map();
 
     // create validation matrix
     Matrix<nr_id> *Va = NULL;
-    if(option->va_path) {
-        if(model->en_rand_shuffle)
-            Va = new Matrix<nr_id>(option->va_path, model->map_f);
-        else Va = new Matrix<nr_id>(option->va_path);
+    if(option.va_path) {
+        if(model.en_rand_shuffle)
+            Va = new Matrix<nr_id>(option.va_path, model.map_f);
+        else Va = new Matrix<nr_id>(option.va_path);
     }
     if(Va) {
         for(int i = 0; i < nr_id; ++i) {
@@ -755,29 +1336,24 @@ void train(int argc, char **argv) {
     }
 
     // shuffle the model
-    if(model->en_rand_shuffle) model->shuffle();
+    if(model.en_rand_shuffle) model.shuffle();
 
     // configulate monitor
-    monitor->model = model;
-    monitor->Va = Va;
-    monitor->scan_tr(Tr);
+    monitor.model = &model;
+    monitor.Va = Va;
+    monitor.scan_tr(Tr);
 
     // create grid matrix from original matrix
-    GridMatrix<nr_id> *TrG;
-    TrG = new GridMatrix<nr_id>(Tr, model->map_f, model->nr_gbs, model->nr_thrs);
+    GridMatrix<nr_id> TrG(Tr, similarity, model.map_f, model.nr_gbs, model.nr_thrs);
 
     // preform gsgd
-    gsgd(TrG, model, monitor);
+    gsgd(&TrG, &model, &monitor);
 
     // inverse shuffle
-    if(model->en_rand_shuffle) model->inv_shuffle();
+    if(model.en_rand_shuffle) model.inv_shuffle();
 
     // output model
-    model->write(option->model_path);
+    model.write(option.model_path);
 
-    delete model;
-    delete monitor;
-    delete option;
-    delete TrG;
     if(NULL != Va)delete Va;
 }

@@ -44,8 +44,7 @@ void convert(char *src_path, char *dst_path) {
     clock.tic();
     FILE *f = fopen(src_path, "r");
     if(!f) exit_file_error(src_path);
-    int *nr_s, nr_rs;
-    nr_s = new int[nr_id];
+    int nr_s[nr_id], nr_rs;
     double sum = 0;
     std::vector<Node<nr_id>> rs;
     Node<nr_id> r;
@@ -62,7 +61,6 @@ void convert(char *src_path, char *dst_path) {
     nr_rs = (int)rs.size();
     fclose(f);
     Matrix<nr_id> R(nr_rs, nr_s, (float)sum / nr_rs);
-    delete[]nr_s;
     {
         int i = 0;
         for(auto it = rs.begin(); it != rs.end(); ++it, ++i) R.M[i] = (*it);
