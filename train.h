@@ -2,9 +2,10 @@
 #include "model.h"
 
 template<int nr_id>
-struct Monitor {
-    int iter,		        // 迭代次数
-        *nr_tr_srs[nr_id];	// 各维各元素的记录条数
+struct Monitor
+{
+    int iter,               // 迭代次数
+        *nr_tr_srs[nr_id];  // 各维各元素的记录条数
     float tr_time;
     bool en_show_tr_rmse,   // 是否显示rmse
          en_show_obj;       // 是否显示obj
@@ -13,18 +14,20 @@ struct Monitor {
     Monitor();
     void print_header();    // output list header
     void show(float iter_time, double loss, float tr_rmse);     // output list
-    void scan_tr(const Matrix<nr_id> &Tr);							// 计算nr_tr_srs
+    void scan_tr(const Matrix<nr_id> &Tr);                          // 计算nr_tr_srs
     double calc_reg();      // calculate ||P[i]|| * lambda
     ~Monitor();
 };
 
 template<int nr_id>
-Monitor<nr_id>::Monitor() : iter(0), tr_time(0.0), Va(NULL), model(NULL) {
+Monitor<nr_id>::Monitor() : iter(0), tr_time(0.0), Va(NULL), model(NULL)
+{
     for(int i = 0; i < nr_id; ++i)nr_tr_srs[i] = NULL;
 }
 
 template<int nr_id>
-void Monitor<nr_id>::print_header() {
+void Monitor<nr_id>::print_header()
+{
     char output[1024];
     sprintf(output, "%4s", "iter");
     sprintf(output + strlen(output), " %10s", "time");
@@ -35,13 +38,15 @@ void Monitor<nr_id>::print_header() {
 }
 
 template<int nr_id>
-void Monitor<nr_id>::show(float iter_time, double loss, float tr_rmse) {
+void Monitor<nr_id>::show(float iter_time, double loss, float tr_rmse)
+{
     char output[1024];
     tr_time += iter_time;
     sprintf(output, "%-4d %10.2f", iter++, tr_time);
     if(en_show_tr_rmse) sprintf(output + strlen(output), " %10.3f", tr_rmse);
     if(Va) sprintf(output + strlen(output), " %10.3f", calc_rmse(model, Va));
-    if(en_show_obj) {
+    if(en_show_obj)
+    {
         double reg = calc_reg();
         sprintf(output + strlen(output), " %13.3e %13.3e %13.3e", loss, reg, loss + reg);   // obj = loss + reg
     }
@@ -50,34 +55,43 @@ void Monitor<nr_id>::show(float iter_time, double loss, float tr_rmse) {
 }
 
 template<int nr_id>
-void Monitor<nr_id>::scan_tr(const Matrix<nr_id> &Tr) {
-    for(int i = 0; i < nr_id; ++i) {
+void Monitor<nr_id>::scan_tr(const Matrix<nr_id> &Tr)
+{
+    for(int i = 0; i < nr_id; ++i)
+    {
         nr_tr_srs[i] = new int[Tr.nr_s[i]];
         memset(nr_tr_srs[i], 0, Tr.nr_s[i] * sizeof(int));
     }
-    for(int i = 0; i < Tr.nr_rs; ++i) {
-        for(int j = 0; j < nr_id; ++j) {
+    for(int i = 0; i < Tr.nr_rs; ++i)
+    {
+        for(int j = 0; j < nr_id; ++j)
+        {
             ++nr_tr_srs[j][Tr.M[i].id[j]];
         }
     }
 }
 
 template<int nr_id>
-double Monitor<nr_id>::calc_reg() {
+double Monitor<nr_id>::calc_reg()
+{
     double result = 0, reg;
-    for(int i = 0; i < nr_id; ++i) {
+    for(int i = 0; i < nr_id; ++i)
+    {
         reg = 0;
         for(int j = 0; j < model->nr_s[i]; ++j)
             reg += nr_tr_srs[i][j] * std::inner_product(&model->P[i][j * model->dim_off], &model->P[i][j * model->dim_off] + model->dim, &model->P[i][j * model->dim_off], 0.0);
-        result += reg * model->l[i];
+        //result += reg * model->l[i];
     }
     return result;
 }
 
 template<int nr_id>
-Monitor<nr_id>::~Monitor() {
-    for(int i = 0; i < nr_id; ++i) {
-        if(NULL != nr_tr_srs[i]) {
+Monitor<nr_id>::~Monitor()
+{
+    for(int i = 0; i < nr_id; ++i)
+    {
+        if(NULL != nr_tr_srs[i])
+        {
             delete[] nr_tr_srs[i];
             nr_tr_srs[i] = NULL;
         }
@@ -86,7 +100,8 @@ Monitor<nr_id>::~Monitor() {
 
 
 template<int nr_id>
-struct TrainOption {
+struct TrainOption
+{
     char *tr_path, *va_path, *model_path;
     TrainOption(int argc, char **argv, Model<nr_id> *model, Monitor<nr_id> *monitor);
     static void exit_train();
@@ -94,66 +109,88 @@ struct TrainOption {
 };
 
 template<int nr_id>
-TrainOption<nr_id>::TrainOption(int argc, char **argv, Model<nr_id> *model, Monitor<nr_id> *monitor) : va_path(NULL), tr_path(NULL), model_path(NULL) {
-    model->dim = 4;	// 预设值
-    model->nr_thrs = 4;
+TrainOption<nr_id>::TrainOption(int argc, char **argv, Model<nr_id> *model, Monitor<nr_id> *monitor) : va_path(NULL), tr_path(NULL), model_path(NULL)
+{
+    model->dim = 4; // 预设值
+    model->nr_thrs = 1;
     model->iter = 40;
-    model->gamma = 0.001f;
-    model->avg = 0.0f;
-    model->en_rand_shuffle = true;
+    //model->gamma = 0.001f;
+    //model->avg = 0.0f;
+    model->en_rand_shuffle = false;
     model->en_avg = true;
     monitor->en_show_tr_rmse = true;
     monitor->en_show_obj = true;
-    for(int i = 0; i < nr_id; ++i) {
+    for(int i = 0; i < nr_id; ++i)
+    {
         model->nr_gbs[i] = 2 * (model->nr_thrs);
-        model->l[i] = 1;
-        model->lb[i] = 1;
-        model->en_b[i] = true;
+        //model->l[i] = 1;
+        //model->lb[i] = 1;
+        model->en_b[i] = false;
     }
-    memset(model->en_sim, true, (1 + nr_id) * nr_id / 2 * sizeof(bool));
+    memset(model->en_sim, false, (1 + nr_id) * nr_id / 2 * sizeof(bool));
     int i;
-    for(i = 2; i < argc; i++) {
+    for(i = 2; i < argc; i++)
+    {
         if(argv[i][0] != '-') break;
         if(i + 1 >= argc) exit_train();
-        if(!strcmp(argv[i], "-k")) {
+        if(!strcmp(argv[i], "-k"))
+        {
             model->dim = atoi(argv[++i]);
-            if(model->dim <= 0) {
+            if(model->dim <= 0)
+            {
                 fprintf(stderr, "dimensions should > 0\n");
                 exit(1);
             }
-        } else if(!strcmp(argv[i], "-t")) {
+        }
+        else if(!strcmp(argv[i], "-t"))
+        {
             model->iter = atoi(argv[++i]);
-            if(model->iter <= 0) {
+            if(model->iter <= 0)
+            {
                 fprintf(stderr, "iterations should > 0\n");
                 exit(1);
             }
-        } else if(!strcmp(argv[i], "-s")) {
+        }
+        else if(!strcmp(argv[i], "-s"))
+        {
             model->nr_thrs = atoi(argv[++i]);
-            if(model->nr_thrs <= 0) {
+            if(model->nr_thrs <= 0)
+            {
                 fprintf(stderr, "number of threads should > 0\n");
                 exit(1);
+                std::cout << "EEE" << std::endl;
+
             }
-        } else if(!strcmp(argv[i], "-g")) {
-            model->gamma = (float)atof(argv[++i]);
-            if(model->gamma <= 0) {
-                fprintf(stderr, "learning rate should > 0\n");
-                exit(1);
-            }
-        } else if(!strcmp(argv[i], "-v")) va_path = argv[++i];
-        else if(!strcmp(argv[i], "-blk")) {
+        }
+        //else if(!strcmp(argv[i], "-g"))
+        //{
+        //    model->gamma = (float)atof(argv[++i]);
+        //    if(model->gamma <= 0)
+        //    {
+        //        fprintf(stderr, "learning rate should > 0\n");
+        //        exit(1);
+        //    }
+        //}
+        else if(!strcmp(argv[i], "-v")) va_path = argv[++i];
+        else if(!strcmp(argv[i], "-blk"))
+        {
             model->nr_gbs[0] = atoi(strtok(argv[++i], "x"));
-            if(model->nr_gbs[0] <= 0) {
+            if(model->nr_gbs[0] <= 0)
+            {
                 fprintf(stderr, "number of blocks should > 0\n");
                 exit(1);
             }
-            for(int j = 1; j < nr_id; ++j) {
+            for(int j = 1; j < nr_id; ++j)
+            {
                 model->nr_gbs[j] = atoi(strtok(NULL, "x"));
-                if(model->nr_gbs[j] <= 0) {
+                if(model->nr_gbs[j] <= 0)
+                {
                     fprintf(stderr, "number of blocks should > 0\n");
                     exit(1);
                 }
             }
-        } else if(!strcmp(argv[i], "--rand-shuffle")) model->en_rand_shuffle = true;
+        }
+        else if(!strcmp(argv[i], "--rand-shuffle")) model->en_rand_shuffle = true;
         else if(!strcmp(argv[i], "--no-rand-shuffle")) model->en_rand_shuffle = false;
         else if(!strcmp(argv[i], "--tr-rmse")) monitor->en_show_tr_rmse = true;
         else if(!strcmp(argv[i], "--no-tr-rmse")) monitor->en_show_tr_rmse = false;
@@ -191,17 +228,21 @@ TrainOption<nr_id>::TrainOption(int argc, char **argv, Model<nr_id> *model, Moni
         //        fprintf(stderr, "cost should >= 0\n");
         //        exit(1);
         //    }
-        else {
+        else
+        {
             fprintf(stderr, "Invalid option: %s\n", argv[i]);
             exit_train();
         }
     }
     if(i >= argc) exit_train();
     tr_path = argv[i++];
-    if(i < argc) {
+    if(i < argc)
+    {
         model_path = new char[strlen(argv[i]) + 1];
         sprintf(model_path, "%s", argv[i]);
-    } else {
+    }
+    else
+    {
         char *p = strrchr(argv[i - 1], '/');
         if(p == NULL)
             p = argv[i - 1];
@@ -210,7 +251,8 @@ TrainOption<nr_id>::TrainOption(int argc, char **argv, Model<nr_id> *model, Moni
         model_path = new char[strlen(p) + 7];
         sprintf(model_path, "%s.model", p);
     }
-    if(va_path) {
+    if(va_path)
+    {
         FILE *f = fopen(va_path, "rb");    //Check if validation set exist.
         if(!f) exit_file_error(va_path);
         fclose(f);
@@ -218,7 +260,8 @@ TrainOption<nr_id>::TrainOption(int argc, char **argv, Model<nr_id> *model, Moni
 }
 
 template<int nr_id>
-void TrainOption<nr_id>::exit_train() {
+void TrainOption<nr_id>::exit_train()
+{
     printf(
         "usage: libmf train [options] binary_train_file model\n"
         "\n"
@@ -246,12 +289,14 @@ void TrainOption<nr_id>::exit_train() {
 }
 
 template<int nr_id>
-TrainOption<nr_id>::~TrainOption() {
+TrainOption<nr_id>::~TrainOption()
+{
     delete[] model_path;
 }
 
 template<int nr_id>
-struct GridMatrix {
+struct GridMatrix
+{
     int nr_gbs[nr_id],  // number of block for each dimension
         nr_gbs_a,           // total blocks
         seg[nr_id];
@@ -266,7 +311,8 @@ struct GridMatrix {
 };
 
 template<int nr_id>
-GridMatrix<nr_id>::GridMatrix(const Matrix<nr_id> &R, const Similarity<nr_id> &S, int **map, int *_nr_gbs, int nr_thrs) {
+GridMatrix<nr_id>::GridMatrix(const Matrix<nr_id> &R, const Similarity<nr_id> &S, int **map, int *_nr_gbs, int nr_thrs)
+{
     printf("Griding...");
     fflush(stdout);
     Clock clock;
@@ -274,7 +320,8 @@ GridMatrix<nr_id>::GridMatrix(const Matrix<nr_id> &R, const Similarity<nr_id> &S
 
     // assign block numbers and total block numbers
     nr_gbs_a = 1;
-    for(int i = 0; i < nr_id; ++i) {
+    for(int i = 0; i < nr_id; ++i)
+    {
         nr_gbs[i] = _nr_gbs[i];
         nr_gbs_a *= nr_gbs[i];
     }
@@ -284,15 +331,18 @@ GridMatrix<nr_id>::GridMatrix(const Matrix<nr_id> &R, const Similarity<nr_id> &S
     std::mutex mtx;
 
     // assign counts for blocks
-    for(int i = 0; i < nr_id; ++i) {
+    for(int i = 0; i < nr_id; ++i)
+    {
         seg[i] = (int)ceil(double(R.nr_s[i]) / nr_gbs[i]);
     }
 
     // r_map to collect record count for each blocks
     int *r_map = new int[nr_gbs_a];
     memset(r_map, 0, nr_gbs_a * sizeof(int));
-    for(int i = 0, idx = 0; i < R.nr_rs; ++i, idx = 0) {
-        for(int j = 0; j < nr_id; ++j) {
+    for(int i = 0, idx = 0; i < R.nr_rs; ++i, idx = 0)
+    {
+        for(int j = 0; j < nr_id; ++j)
+        {
             idx *= nr_gbs[j];
             idx += (map[j] ? map[j][R.M[i].id[j]] : R.M[i].id[j]) / seg[j];
         }
@@ -301,8 +351,10 @@ GridMatrix<nr_id>::GridMatrix(const Matrix<nr_id> &R, const Similarity<nr_id> &S
 
     // set grid similarity
     int num_avg[(1 + nr_id)*nr_id / 2];
-    for(int i = 0, ij = 0; i < nr_id; ++i) {
-        for(int j = 0; j <= i; ++j, ++ij) {
+    for(int i = 0, ij = 0; i < nr_id; ++i)
+    {
+        for(int j = 0; j <= i; ++j, ++ij)
+        {
             sim[ij] = new std::unordered_map<ArrayIndex<int, 2>, float, Arrayhash<ArrayIndex<int, 2>>, Arrayequal<ArrayIndex<int, 2>>>[nr_gbs[i] * nr_gbs[j]];
             sim_avg[ij] = 0.0f;
             num_avg[ij] = 0;
@@ -312,9 +364,12 @@ GridMatrix<nr_id>::GridMatrix(const Matrix<nr_id> &R, const Similarity<nr_id> &S
     }
 
     ArrayIndex<int, 2> ai;
-    for(int i = 0, ij = 0, blkNum; i < nr_id; ++i) {
-        for(int j = 0; j <= i; ++j, ++ij) {
-            for(auto it = S.M[ij].begin(); it != S.M[ij].end(); ++it) {
+    for(int i = 0, ij = 0, blkNum; i < nr_id; ++i)
+    {
+        for(int j = 0; j <= i; ++j, ++ij)
+        {
+            for(auto it = S.M[ij].begin(); it != S.M[ij].end(); ++it)
+            {
                 ai.id[0] = it->id[0];
                 ai.id[1] = it->id[1];
                 blkNum = ai.id[0] / seg[i] * nr_gbs[j] + ai.id[1] / seg[j];
@@ -338,24 +393,30 @@ GridMatrix<nr_id>::GridMatrix(const Matrix<nr_id> &R, const Similarity<nr_id> &S
     //    }
     //}
 
-    for(int i = 0, ij = 0; i < nr_id; ++i) {
-        for(int j = 0; j <= i; ++j, ++ij) {
-            if(num_avg[ij] > 0) {
+    for(int i = 0, ij = 0; i < nr_id; ++i)
+    {
+        for(int j = 0; j <= i; ++j, ++ij)
+        {
+            if(num_avg[ij] > 0)
+            {
                 sim_avg[ij] /= num_avg[ij];
             }
         }
     }
 
 // create gird matrix and clear r_map
-    for(int i = 0; i < nr_gbs_a; ++i) {
-        GMS[i] = new Matrix<nr_id>(r_map[i], R.nr_s, R.avg);	// GMS[i] 第i块的Matrix
-        r_map[i] = 0;									    // r_map: 各块中的元素个数
+    for(int i = 0; i < nr_gbs_a; ++i)
+    {
+        GMS[i] = new Matrix<nr_id>(r_map[i], R.nr_s, R.avg);    // GMS[i] 第i块的Matrix
+        r_map[i] = 0;                                       // r_map: 各块中的元素个数
     }
 
 // assign value to grid matrix
     int new_id[nr_id];  // store mapped node
-    for(int i = 0, idx = 0; i < R.nr_rs; ++i, idx = 0) {
-        for(int j = 0; j < nr_id; ++j) {
+    for(int i = 0, idx = 0; i < R.nr_rs; ++i, idx = 0)
+    {
+        for(int j = 0; j < nr_id; ++j)
+        {
             idx *= nr_gbs[j];
             new_id[j] = map[j] ? map[j][R.M[i].id[j]] : R.M[i].id[j];
             idx += new_id[j] / seg[j];
@@ -406,22 +467,27 @@ GridMatrix<nr_id>::GridMatrix(const Matrix<nr_id> &R, const Similarity<nr_id> &S
 
 // multithread
 template<int nr_id>
-void GridMatrix<nr_id>::sort_ratings(Matrix<nr_id> *M, std::mutex *mtx, int *nr_thrs) {
+void GridMatrix<nr_id>::sort_ratings(Matrix<nr_id> *M, std::mutex *mtx, int *nr_thrs)
+{
     M->sort();
     std::lock_guard<std::mutex> lock(*mtx);
     (*nr_thrs)--;
 }
 
 template<int nr_id>
-GridMatrix<nr_id>::~GridMatrix() {
-    if(NULL != GMS) {
+GridMatrix<nr_id>::~GridMatrix()
+{
+    if(NULL != GMS)
+    {
         for(int i = 0; i < nr_gbs_a; ++i)delete GMS[i];
         delete[] GMS;
         GMS = NULL;
     }
 
-    for(int i = 0, ij = 0; i < nr_id; ++i) {
-        for(int j = 0; j <= i; ++j, ++ij) {
+    for(int i = 0, ij = 0; i < nr_id; ++i)
+    {
+        for(int j = 0; j <= i; ++j, ++ij)
+        {
             delete[] sim[ij];
             //delete[] sim_avg[ij];
         }
@@ -429,7 +495,8 @@ GridMatrix<nr_id>::~GridMatrix() {
 }
 
 template<int nr_id>
-class Scheduler {
+class Scheduler
+{
     int *nr_jts,            // update times for each job
         *order,             // mapper of job id
         nr_gbs[nr_id],
@@ -459,10 +526,12 @@ public:
 };
 
 template<int nr_id>
-Scheduler<nr_id>::Scheduler(int *_nr_gbs, int _nr_thrs) : nr_gbs_a(1), nr_jts(NULL), order(NULL), losses(NULL), nr_thrs(_nr_thrs), total_jobs(0), nr_paused_thrs(0), paused(false), terminated(false) {
+Scheduler<nr_id>::Scheduler(int *_nr_gbs, int _nr_thrs) : nr_gbs_a(1), nr_jts(NULL), order(NULL), losses(NULL), nr_thrs(_nr_thrs), total_jobs(0), nr_paused_thrs(0), paused(false), terminated(false)
+{
     //blocked = new bool*[nr_id];
     //nr_gbs = new int[nr_id];
-    for(int i = 0; i < nr_id; ++i) {
+    for(int i = 0; i < nr_id; ++i)
+    {
         nr_gbs[i] = _nr_gbs[i];
         blocked[i] = new bool[nr_gbs[i]];
         for(int j = 0; j < nr_gbs[i]; ++j)blocked[i][j] = false;
@@ -471,7 +540,8 @@ Scheduler<nr_id>::Scheduler(int *_nr_gbs, int _nr_thrs) : nr_gbs_a(1), nr_jts(NU
     nr_jts = new int[nr_gbs_a];
     order = new int[nr_gbs_a];
     losses = new double[nr_gbs_a];
-    for(int i = 0; i < nr_gbs_a; ++i) {
+    for(int i = 0; i < nr_gbs_a; ++i)
+    {
         nr_jts[i] = 0;
         losses[i] = 0;
         order[i] = i;
@@ -479,18 +549,23 @@ Scheduler<nr_id>::Scheduler(int *_nr_gbs, int _nr_thrs) : nr_gbs_a(1), nr_jts(NU
 }
 
 template<int nr_id>
-int Scheduler<nr_id>::get_job() {
+int Scheduler<nr_id>::get_job()
+{
     // find available jid
     int jid = -1, ts = INT_MAX;
-    while(true) {
+    while(true)
+    {
         {
             std::lock_guard<std::mutex> lock(mtx);
             bool blocked_flag;
-            for(int mx = 0; mx < nr_gbs_a; mx++) {
+            for(int mx = 0; mx < nr_gbs_a; mx++)
+            {
                 int nx = order[mx];
                 blocked_flag = false;
-                for(int i = nr_id - 1; i >= 0; --i) {
-                    if(blocked[i][nx % nr_gbs[i]]) {
+                for(int i = nr_id - 1; i >= 0; --i)
+                {
+                    if(blocked[i][nx % nr_gbs[i]])
+                    {
                         blocked_flag = true;
                         break;
                     }
@@ -508,7 +583,8 @@ int Scheduler<nr_id>::get_job() {
     // lock up current jid and return
     {
         std::lock_guard<std::mutex> lock(mtx);
-        for(int i = nr_id - 1, jid1 = jid; i >= 0; --i) {
+        for(int i = nr_id - 1, jid1 = jid; i >= 0; --i)
+        {
             blocked[i][jid1 % nr_gbs[i]] = true;
             jid1 /= nr_gbs[i];
         }
@@ -518,9 +594,11 @@ int Scheduler<nr_id>::get_job() {
 }
 
 template<int nr_id>
-void Scheduler<nr_id>::put_job(int jid, double loss) {
+void Scheduler<nr_id>::put_job(int jid, double loss)
+{
     std::lock_guard<std::mutex> lock(mtx);
-    for(int i = nr_id - 1, jid1 = jid; i >= 0; --i) {
+    for(int i = nr_id - 1, jid1 = jid; i >= 0; --i)
+    {
         blocked[i][jid1 % nr_gbs[i]] = false;
         jid1 /= nr_gbs[i];
     }
@@ -529,19 +607,22 @@ void Scheduler<nr_id>::put_job(int jid, double loss) {
 }
 
 template<int nr_id>
-double Scheduler<nr_id>::get_loss() {
+double Scheduler<nr_id>::get_loss()
+{
     double loss = 0;
     for(int ix = 0; ix < nr_gbs_a; ix++) loss += losses[ix];
     return loss;
 }
 
 template<int nr_id>
-int Scheduler<nr_id>::get_total_jobs() {
+int Scheduler<nr_id>::get_total_jobs()
+{
     return total_jobs;
 }
 
 template<int nr_id>
-void Scheduler<nr_id>::pause_sgd() {
+void Scheduler<nr_id>::pause_sgd()
+{
     {
         std::lock_guard<std::mutex> lock(mtx);
         paused = true;
@@ -550,11 +631,13 @@ void Scheduler<nr_id>::pause_sgd() {
 }
 
 template<int nr_id>
-void Scheduler<nr_id>::pause() {
+void Scheduler<nr_id>::pause()
+{
     {
         std::lock_guard<std::mutex> lock(mtx);
         if(!paused) return;
-    } {
+    }
+    {
         std::lock_guard<std::mutex> lock(mtx);
         ++nr_paused_thrs;
     }
@@ -569,25 +652,29 @@ void Scheduler<nr_id>::pause() {
 }
 
 template<int nr_id>
-bool Scheduler<nr_id>::all_paused() {
+bool Scheduler<nr_id>::all_paused()
+{
     std::lock_guard<std::mutex> lock(mtx);
     return (nr_paused_thrs == nr_thrs);
 }
 
 template<int nr_id>
-void Scheduler<nr_id>::resume() {
+void Scheduler<nr_id>::resume()
+{
     std::lock_guard<std::mutex> lock(mtx);
     std::random_shuffle(order, order + nr_gbs_a);
     paused = false;
 }
 
 template<int nr_id>
-void Scheduler<nr_id>::terminate() {
+void Scheduler<nr_id>::terminate()
+{
     terminated = true;
 }
 
 template<int nr_id>
-bool Scheduler<nr_id>::is_terminated() {
+bool Scheduler<nr_id>::is_terminated()
+{
     return terminated;
 }
 
@@ -601,7 +688,8 @@ bool Scheduler<nr_id>::is_terminated() {
 //}
 
 template<int nr_id>
-Scheduler<nr_id>::~Scheduler() {
+Scheduler<nr_id>::~Scheduler()
+{
     delete[] nr_jts;
     delete[] order;
     delete[] losses;
@@ -609,7 +697,8 @@ Scheduler<nr_id>::~Scheduler() {
 }
 
 template<int nr_id>
-void sgd(GridMatrix<nr_id> *TrG, Model<nr_id> *model, Scheduler<nr_id> *scheduler, int tid) {
+void sgd(GridMatrix<nr_id> *TrG, Model<nr_id> *model, Scheduler<nr_id> *scheduler, int tid)
+{
     float *P[nr_id];
     float *B[nr_id];
     memcpy(P, model->P, nr_id * sizeof(float*));
@@ -617,88 +706,67 @@ void sgd(GridMatrix<nr_id> *TrG, Model<nr_id> *model, Scheduler<nr_id> *schedule
 
     const int dim = model->dim_off;
     Node<nr_id> *r1 = NULL, *r2 = NULL;
+
     float *p1[nr_id];
     float *p2[nr_id];
-    float b1[nr_id];
-    float b2[nr_id];
+    float *b1[nr_id];
+    float *b2[nr_id];
+
     bool en_b[nr_id];
     memcpy(en_b, model->en_b, nr_id * sizeof(bool));
+
     bool en_sim[(1 + nr_id) * nr_id / 2];
     memcpy(en_sim, model->en_sim, (1 + nr_id) * nr_id / 2 * sizeof(bool));
+
     int dx, jid;
     long mx, nr_rs;
-    double loss = 0;
+    double loss;
 
-    //__m128 XMMgl[nr_id];
-    //for(int i = 0; i < nr_id; ++i) {
-    //    XMMgl[i] = _mm_load1_ps(&model->gl[i]);
-    //}
-
-    float gammap = model->gamma;
-    float gammab = model->gamma;
-    //float gamma2p = model->gamma * 2;
-    //float gamma2b = model->gamma * 2;
-    //__m128 XMMg2p = _mm_load1_ps(&gamma2p);
-    //__m128 XMMg2b = _mm_load1_ps(&gamma2b);
-    //__m128 XMMavg = _mm_load1_ps(&model->avg);
+    float gammap = model->gammap;
+    float gammab = model->gammab;
     float avg = model->avg;
-    //__m128d XMMl;// = _mm_setzero_pd();
 
-    //// get lambda form model
-    //__m128 XMMlambda2[(1 + nr_id) * nr_id / 2];
-    //for(int i = 0, ij = 0; i < nr_id; ++i) {
-    //    for(int j = 0; j <= i; ++j, ++ij) {
-    //        XMMlambda2[ij] = _mm_load1_ps(&model->lambda2[i]);
-    //    }
-    //}
     float lambda2[(1 + nr_id) * nr_id / 2];
-    memcpy(lambda2, model->lambda2, sizeof(float*) * (1 + nr_id) * nr_id / 2);
+    memcpy(lambda2, model->lambda2, sizeof(float) * (1 + nr_id) * nr_id / 2);
 
     float lambda3[nr_id];
-    memcpy(lambda3, model->lambda3, sizeof(float*) * nr_id);
+    memcpy(lambda3, model->lambda3, sizeof(float) * nr_id);
 
     float lambda4[(1 + nr_id) * nr_id / 2];
-    memcpy(lambda4, model->lambda4, sizeof(float*) * (1 + nr_id) * nr_id / 2);
+    memcpy(lambda4, model->lambda4, sizeof(float) * (1 + nr_id) * nr_id / 2);
 
     float lambda5[nr_id];
-    memcpy(lambda5, model->lambda5, sizeof(float*)* nr_id);
+    memcpy(lambda5, model->lambda5, sizeof(float) * nr_id);
 
-    //__m128 XMMlambda3[nr_id];
-    //for(int i = 0; i < nr_id; ++i) {
-    //    XMMlambda3[i] = _mm_load1_ps(&model->lambda3[i]);
-    //}
-
-    //for(int i = 0; i < nr_id; ++i) {
-    //    XMMgl[i] = _mm_load1_ps(&model->gl[i]);
-    //}
     std::unordered_map<ArrayIndex<int, 2>, float, Arrayhash<ArrayIndex<int, 2>>, Arrayequal<ArrayIndex<int, 2>>> *pHash[(1 + nr_id)*nr_id / 2];
 
-    while(true) {
+    while(true)
+    {
         jid = scheduler->get_job();
         r1 = TrG->GMS[jid]->M;
         nr_rs = TrG->GMS[jid]->nr_rs;
-        __m128d XMMl = _mm_setzero_pd();
+        //__m128d XMMl = _mm_setzero_pd();
+        loss = 0;
 
-        for(int i = 0, ij = 0; i < nr_id; ++i) {
-            for(int j = 0; j <= i; ++j, ++ij) {
+        for(int i = 0, ij = 0; i < nr_id; ++i)
+        {
+            for(int j = 0; j <= i; ++j, ++ij)
+            {
                 pHash[ij] = &TrG->sim[ij][jid];
             }
         }
 
-        for(mx = 0; mx < nr_rs - 1; mx += 2, r1 += 2) {						// 每次更新一个分数记录: P[id[0~(nr_id-1)]], loss
+        for(mx = 0; mx < nr_rs - 1; mx += 2, r1 += 2)                       // 每次更新一个分数记录: P[id[0~(nr_id-1)]], loss
+        {
             r2 = r1 + 1;
-            //__m128 XMMr1 = _mm_load1_ps(&r1->rate);
-            //__m128 XMMr2 = _mm_load1_ps(&r2->rate);
             __m128 XMMpsum1 = _mm_setzero_ps();
             __m128 XMMpsum2 = _mm_setzero_ps();
-            //__m128 XMMe1 = _mm_setzero_ps();
-            //__m128 XMMe2 = _mm_setzero_ps();
-            //__m128 XMMf[nr_id][nr_id];
-            for(int i = 0; i < nr_id; ++i) {
+            for(int i = 0; i < nr_id; ++i)
+            {
                 p1[i] = P[i] + r1->id[i] * dim;
-                b1[i] = *(B[i] + r1->id[i]);
+                b1[i] = B[i] + r1->id[i];
                 p2[i] = P[i] + r2->id[i] * dim;
-                b2[i] = *(B[i] + r2->id[i]);
+                b2[i] = B[i] + r2->id[i];
             }
             //_mm_prefetch((const char *)(r), _MM_HINT_T0);
             //for(int i = 0; i < nr_id; ++i) {
@@ -717,47 +785,46 @@ void sgd(GridMatrix<nr_id> *TrG, Model<nr_id> *model, Scheduler<nr_id> *schedule
             //    }
             //}
 
-            // TODO: ???????????l += sum((Qij - pq[i]^2 - b[i] - b[j] - avgx)^2)
-            // TODO: ???????????l += sum((pq[i]^2) + sum(b[i]^2)
-
-            for(int i = 0; i < nr_id; ++i) {					// (pqi * pqj)
-                for(int j = i + 1; j < nr_id; ++j) {
-                    for(dx = 0; dx < dim - 7; dx += 8) {
+            for(int i = 0; i < nr_id; ++i)                      // (pqi * pqj)
+            {
+                for(int j = i + 1; j < nr_id; ++j)
+                {
+                    for(dx = 0; dx < dim - 7; dx += 8)
+                    {
                         __m128 XMMp11 = _mm_loadu_ps(p1[i] + dx);
                         __m128 XMMq11 = _mm_loadu_ps(p1[j] + dx);
                         __m128 XMMp12 = _mm_loadu_ps(p1[i] + dx + 4);
                         __m128 XMMq12 = _mm_loadu_ps(p1[j] + dx + 4);
+
                         __m128 XMMp21 = _mm_loadu_ps(p2[i] + dx);
                         __m128 XMMq21 = _mm_loadu_ps(p2[j] + dx);
                         __m128 XMMp22 = _mm_loadu_ps(p2[i] + dx + 4);
                         __m128 XMMq22 = _mm_loadu_ps(p2[j] + dx + 4);
+
                         XMMp11 = _mm_mul_ps(XMMp11, XMMq11);
                         XMMp12 = _mm_mul_ps(XMMp12, XMMq12);
+
                         XMMp21 = _mm_mul_ps(XMMp21, XMMq21);
                         XMMp22 = _mm_mul_ps(XMMp22, XMMq22);
-                        //XMMe1 = _mm_add_ps(XMMe1, _mm_add_ps(XMMp11, XMMp12));
-                        //XMMe2 = _mm_add_ps(XMMe2, _mm_add_ps(XMMp21, XMMp22));
+
                         XMMpsum1 = _mm_add_ps(XMMpsum1, _mm_add_ps(XMMp11, XMMp12));
                         XMMpsum2 = _mm_add_ps(XMMpsum2, _mm_add_ps(XMMp21, XMMp22));
                     }
-                    for(; dx < dim; dx += 4) {
+                    for(; dx < dim; dx += 4)
+                    {
                         __m128 XMMp1 = _mm_loadu_ps(p1[i] + dx);
                         __m128 XMMq1 = _mm_loadu_ps(p1[j] + dx);
                         __m128 XMMp2 = _mm_loadu_ps(p2[i] + dx);
                         __m128 XMMq2 = _mm_loadu_ps(p2[j] + dx);
-                        //XMMe1 = _mm_add_ps(XMMe1, _mm_mul_ps(XMMp1, XMMq1));
-                        //XMMe2 = _mm_add_ps(XMMe2, _mm_mul_ps(XMMp2, XMMq2));
+
                         XMMpsum1 = _mm_add_ps(XMMpsum1, _mm_mul_ps(XMMp1, XMMq1));
                         XMMpsum2 = _mm_add_ps(XMMpsum2, _mm_mul_ps(XMMp2, XMMq2));
                     }
                 }
             }
-            //XMMe1 = _mm_hadd_ps(XMMe1, XMMe1);
-            //XMMe1 = _mm_hadd_ps(XMMe1, XMMe1);
-            //XMMe2 = _mm_hadd_ps(XMMe2, XMMe2);
-            //XMMe2 = _mm_hadd_ps(XMMe2, XMMe2);
             XMMpsum1 = _mm_hadd_ps(XMMpsum1, XMMpsum1);
             XMMpsum1 = _mm_hadd_ps(XMMpsum1, XMMpsum1);
+
             XMMpsum2 = _mm_hadd_ps(XMMpsum2, XMMpsum2);
             XMMpsum2 = _mm_hadd_ps(XMMpsum2, XMMpsum2);
 
@@ -765,41 +832,29 @@ void sgd(GridMatrix<nr_id> *TrG, Model<nr_id> *model, Scheduler<nr_id> *schedule
             _mm_store_ss(&e1, XMMpsum1);
             _mm_store_ss(&e2, XMMpsum2);
 
-            for(int i = 0; i < nr_id; ++i) {					// e += sum(bias)
-                if(en_b[i]) {
-                    e1 += b1[i];
-                    e2 += b2[i];
+            for(int i = 0; i < nr_id; ++i)                      // e += sum(bias)
+            {
+                if(en_b[i])
+                {
+                    e1 += *(b1[i]);
+                    e2 += *(b2[i]);
                 }
             }
 
             e1 = r1->rate - e1 - avg;
             e2 = r2->rate - e2 - avg;
 
-
-            // e = r - (sum(p) + sum(b) +avg1)
-            //XMMe1 = _mm_add_ps(XMMe1, XMMpsum1);                // e+= sum(p)
-            //XMMe2 = _mm_add_ps(XMMe2, XMMpsum2);
-
-            //for(int i = 0; i < nr_id; ++i) {					// e += sum(bias)
-            //    if(en_b[i]) {
-            //        XMMe1 = _mm_add_ps(XMMe1, _mm_load1_ps(b1[i]));
-            //        XMMe2 = _mm_add_ps(XMMe2, _mm_load1_ps(b2[i]));
-            //    }
-            //}
-
-            //XMMe1 = _mm_sub_ps(XMMr1, _mm_add_ps(XMMe1, XMMavg));// e = r - (e + avg1)
-            //XMMe2 = _mm_sub_ps(XMMr2, _mm_add_ps(XMMe2, XMMavg));// e = r - (e + avg1)
-
-
             //double esum = e1 * e1 + e2 * e2;
             loss += e1 * e1 + e2 * e2;
-            //XMMl = _mm_add_pd(XMMl, _mm_load1_pd(&esum)); // l += (double)(e^2)
 
             float f[nr_id][nr_id];
             // fxy=q-px*py-bx-by-avg2
-            for(int i = 0, ij = 0; i < nr_id; ++i) {
-                for(int j = 0; j <= i; ++j, ++ij) {
-                    if(!model->en_sim[ij]) {
+            for(int i = 0, ij = 0; i < nr_id; ++i)
+            {
+                for(int j = 0; j <= i; ++j, ++ij)
+                {
+                    if(!model->en_sim[ij])
+                    {
                         f[i][j] = 0.0f;
                         f[j][i] = 0.0f;
                         continue;
@@ -813,16 +868,23 @@ void sgd(GridMatrix<nr_id> *TrG, Model<nr_id> *model, Scheduler<nr_id> *schedule
                     //float q1, q2;
 
                     auto it1 = pHash[ij]->find(i1);
-                    if(it1 == pHash[ij]->end() && (i != j || i1.id[0] != i1.id[1])) {
+                    if(it1 == pHash[ij]->end() && (i != j || i1.id[0] != i1.id[1]))
+                    {
                         f[i][j] = 0.0f;
-                    } else {
-                        if(i != j || i1.id[0] != i1.id[1]) {
+                    }
+                    else
+                    {
+                        if(i != j || i1.id[0] != i1.id[1])
+                        {
                             f[i][j] = it1->second - TrG->sim_avg[ij];
-                        } else {
+                        }
+                        else
+                        {
                             f[i][j] = 1.0f - TrG->sim_avg[ij];
                         }
                         __m128 XMMcross = _mm_setzero_ps();
-                        for(dx = 0; dx < dim - 7; dx += 8) {
+                        for(dx = 0; dx < dim - 7; dx += 8)
+                        {
                             __m128 XMMp0 = _mm_loadu_ps(p1[i] + dx);
                             __m128 XMMp1 = _mm_loadu_ps(p1[i] + dx + 4);
                             __m128 XMMq0 = _mm_loadu_ps(p2[j] + dx);
@@ -831,7 +893,8 @@ void sgd(GridMatrix<nr_id> *TrG, Model<nr_id> *model, Scheduler<nr_id> *schedule
                             XMMp1 = _mm_mul_ps(XMMp1, XMMq1);
                             XMMcross = _mm_add_ps(XMMp0, XMMp1);
                         }
-                        for(; dx < dim; dx += 4) {
+                        for(; dx < dim; dx += 4)
+                        {
                             __m128 XMMp0 = _mm_loadu_ps(p1[i] + dx);
                             __m128 XMMq0 = _mm_loadu_ps(p2[j] + dx);
                             XMMcross = _mm_add_ps(XMMp0, XMMq0);
@@ -843,27 +906,31 @@ void sgd(GridMatrix<nr_id> *TrG, Model<nr_id> *model, Scheduler<nr_id> *schedule
                         _mm_store_ss(&pcross , XMMcross);
                         f[i][j] -= pcross;
 
-                        if(en_b[i]) {
-                            f[i][j] -= b1[i];
+                        if(en_b[i])
+                        {
+                            f[i][j] -= *(b1[i]);
                         }
-                        if(en_b[j]) {
-                            f[i][j] -= b2[j];
+                        if(en_b[j])
+                        {
+                            f[i][j] -= *(b2[j]);
                         }
 
-                        //int indexi = i > j ? i : j;
-                        //int indexj = i < j ? i : j;
-                        //loss += lambda2[(indexi + 1) * indexi / 2 + indexj] * f[i][j] * f[i][j];
                         loss += lambda2[ij] * f[i][j] * f[i][j];
                     }
 
-                    if(i != j) {
+                    if(i != j)
+                    {
                         auto it2 = pHash[ij]->find(i2);
-                        if(it2 == pHash[ij]->end()) {
+                        if(it2 == pHash[ij]->end())
+                        {
                             f[j][i] = 0.0f;
-                        } else {
+                        }
+                        else
+                        {
                             f[j][i] = it2->second - TrG->sim_avg[ij];
                             __m128 XMMcross = _mm_setzero_ps();
-                            for(dx = 0; dx < dim - 7; dx += 8) {
+                            for(dx = 0; dx < dim - 7; dx += 8)
+                            {
                                 __m128 XMMp0 = _mm_loadu_ps(p2[i] + dx);
                                 __m128 XMMp1 = _mm_loadu_ps(p2[i] + dx + 4);
                                 __m128 XMMq0 = _mm_loadu_ps(p1[j] + dx);
@@ -872,7 +939,8 @@ void sgd(GridMatrix<nr_id> *TrG, Model<nr_id> *model, Scheduler<nr_id> *schedule
                                 XMMp1 = _mm_mul_ps(XMMp1, XMMq1);
                                 XMMcross = _mm_sub_ps(XMMcross, _mm_add_ps(XMMp0, XMMp1));
                             }
-                            for(; dx < dim; dx += 4) {
+                            for(; dx < dim; dx += 4)
+                            {
                                 __m128 XMMp0 = _mm_loadu_ps(p2[i] + dx);
                                 __m128 XMMq0 = _mm_loadu_ps(p1[j] + dx);
                                 XMMcross = _mm_sub_ps(XMMcross, _mm_add_ps(XMMp0, XMMq0));
@@ -880,149 +948,64 @@ void sgd(GridMatrix<nr_id> *TrG, Model<nr_id> *model, Scheduler<nr_id> *schedule
                             XMMcross = _mm_hadd_ps(XMMcross, XMMcross);
                             XMMcross = _mm_hadd_ps(XMMcross, XMMcross);
 
-                            if(en_b[j]) {
-                                f[j][i] -= b1[j];
+                            if(en_b[j])
+                            {
+                                f[j][i] -= *(b1[j]);
                             }
-                            if(en_b[i]) {
-                                f[j][i] -= b2[i];
+                            if(en_b[i])
+                            {
+                                f[j][i] -= *(b2[i]);
                             }
                         }
-                        //int indexi = i > j ? i : j;
-                        //int indexj = i < j ? i : j;
                         loss += lambda2[ij] * f[j][i] * f[j][i];
                     }
                 }
             }
-
-
-            //// fxy=q-px*py-bx-by-avg2
-            //float qzero = 0.0f;
-            //for(int i = 0, ij = 0; i < nr_id; ++i) {
-            //    for(int j = 0; j <= i; ++j, ++ij) {
-            //        if(!model->en_sim[ij]) {
-            //            XMMf[i][j] = _mm_load1_ps(&qzero);
-            //            XMMf[j][i] = _mm_load1_ps(&qzero);
-            //            continue;
-            //        }
-            //        ArrayIndex<int, 2> i1, i2;
-            //        i1.id[0] = r1->id[i];
-            //        i1.id[1] = r2->id[j];
-            //        i2.id[0] = r2->id[i];
-            //        i2.id[1] = r1->id[j];
-
-            //        float q1, q2;
-
-            //        auto it1 = pHash[ij]->find(i1);
-            //        if(it1 == pHash[ij]->end() && (i != j || i1.id[0] != i1.id[1])) {
-            //            XMMf[i][j] = _mm_load1_ps(&qzero);
-            //        } else {
-            //            if(i != j || i1.id[0] != i1.id[1]) {
-            //                q1 = it1->second - TrG->sim_avg[ij];
-            //            } else {
-            //                q1 = 1.0f - TrG->sim_avg[ij];
-            //            }
-            //            XMMf[i][j] = _mm_load1_ps(&q1);
-            //            for(dx = 0; dx < dim - 7; dx += 8) {
-            //                __m128 XMMp0 = _mm_loadu_ps(p1[i] + dx);
-            //                __m128 XMMp1 = _mm_loadu_ps(p1[i] + dx + 4);
-            //                __m128 XMMq0 = _mm_loadu_ps(p2[j] + dx);
-            //                __m128 XMMq1 = _mm_loadu_ps(p2[j] + dx + 4);
-            //                XMMp0 = _mm_mul_ps(XMMp0, XMMq0);
-            //                XMMp1 = _mm_mul_ps(XMMp1, XMMq1);
-            //                XMMf[i][j] = _mm_sub_ps(XMMf[i][j], _mm_add_ps(XMMp0, XMMp1));
-            //            }
-            //            for(; dx < dim; dx += 4) {
-            //                __m128 XMMp0 = _mm_loadu_ps(p1[i] + dx);
-            //                __m128 XMMq0 = _mm_loadu_ps(p2[j] + dx);
-            //                XMMf[i][j] = _mm_sub_ps(XMMf[i][j], _mm_add_ps(XMMp0, XMMq0));
-            //            }
-            //            if(en_b[i]) {
-            //                XMMf[i][j] = _mm_sub_ps(XMMf[i][j], _mm_load1_ps(&b1[i]));
-            //            }
-            //            if(en_b[j]) {
-            //                XMMf[i][j] = _mm_sub_ps(XMMf[i][j], _mm_load1_ps(&b2[j]));
-            //            }
-
-            //            int indexi = i > j ? i : j;
-            //            int indexj = i < j ? i : j;
-            //            XMMl = _mm_add_pd(XMMl, _mm_cvtps_pd(_mm_mul_ps(XMMlambda2[(indexi + 1) * indexi / 2 + indexj], _mm_mul_ps(XMMf[i][j], XMMf[i][j])))); // l += lambda2*(f^2)
-            //        }
-
-            //        if(i != j) {
-            //            auto it2 = pHash[ij]->find(i2);
-            //            if(it2 == pHash[ij]->end()) {
-            //                XMMf[j][i] = _mm_load1_ps(&qzero);
-            //            } else {
-            //                q2 = it2->second - TrG->sim_avg[ij];
-            //                XMMf[j][i] = _mm_load1_ps(&q2);
-            //                for(dx = 0; dx < dim - 7; dx += 8) {
-            //                    __m128 XMMp0 = _mm_loadu_ps(p2[i] + dx);
-            //                    __m128 XMMp1 = _mm_loadu_ps(p2[i] + dx + 4);
-            //                    __m128 XMMq0 = _mm_loadu_ps(p1[j] + dx);
-            //                    __m128 XMMq1 = _mm_loadu_ps(p1[j] + dx + 4);
-            //                    XMMp0 = _mm_mul_ps(XMMp0, XMMq0);
-            //                    XMMp1 = _mm_mul_ps(XMMp1, XMMq1);
-            //                    XMMf[j][i] = _mm_sub_ps(XMMf[j][i], _mm_add_ps(XMMp0, XMMp1));
-            //                }
-            //                for(; dx < dim; dx += 4) {
-            //                    __m128 XMMp0 = _mm_loadu_ps(p2[i] + dx);
-            //                    __m128 XMMq0 = _mm_loadu_ps(p1[j] + dx);
-            //                    XMMf[j][i] = _mm_sub_ps(XMMf[j][i], _mm_add_ps(XMMp0, XMMq0));
-            //                }
-            //                if(en_b[j]) {
-            //                    XMMf[j][i] = _mm_sub_ps(XMMf[j][j], _mm_load1_ps(&b1[j]));
-            //                }
-            //                if(en_b[i]) {
-            //                    XMMf[j][i] = _mm_sub_ps(XMMf[j][i], _mm_load1_ps(&b2[i]));
-            //                }
-            //            }
-            //            int indexi = i > j ? i : j;
-            //            int indexj = i < j ? i : j;
-            //            XMMl = _mm_add_pd(XMMl, _mm_cvtps_pd(_mm_mul_ps(XMMlambda2[(indexi + 1) * indexi / 2 + indexj], _mm_mul_ps(XMMf[j][i], XMMf[j][i])))); // l += lambda2*(f^2)
-            //        }
-            //    }
-            //}
-
             // update
-            float p1g2e = gammap * 2 * e1;
-            float p2g2e = gammap * 2 * e2;
-            for(dx = 0; dx < dim - 7; dx += 8) {
+            float gammap2 = gammap * 2;
+            for(dx = 0; dx < dim - 7; dx += 8)
+            {
                 __m128 XMMsum10 = _mm_setzero_ps();  // sum(p1)
                 __m128 XMMsum11 = _mm_setzero_ps();
                 __m128 XMMsum20 = _mm_setzero_ps();  // sum(p2)
                 __m128 XMMsum21 = _mm_setzero_ps();
-                for(int i = 0; i < nr_id; ++i) {
+                for(int i = 0; i < nr_id; ++i)
+                {
                     XMMsum10 = _mm_add_ps(XMMsum10, _mm_loadu_ps(p1[i] + dx));
                     XMMsum11 = _mm_add_ps(XMMsum11, _mm_loadu_ps(p1[i] + dx + 4));
                     XMMsum20 = _mm_add_ps(XMMsum20, _mm_loadu_ps(p2[i] + dx));
                     XMMsum21 = _mm_add_ps(XMMsum21, _mm_loadu_ps(p2[i] + dx + 4));
                 }
 
-                for(int i = 0; i < nr_id; ++i) {
-                    float p1g2e1 = p1g2e + 1.0f + lambda3[i];
-                    float p2g2e1 = p2g2e + 1.0f + lambda3[i];
-                    __m128 XMMp10 = _mm_mul_ps(_mm_loadu_ps(p1[i] + dx), _mm_loadu_ps(&p1g2e1));
-                    __m128 XMMp11 = _mm_mul_ps(_mm_loadu_ps(p1[i] + dx + 4), _mm_loadu_ps(&p1g2e1));
-                    __m128 XMMp20 = _mm_mul_ps(_mm_loadu_ps(p2[i] + dx), _mm_loadu_ps(&p2g2e1));
-                    __m128 XMMp21 = _mm_mul_ps(_mm_loadu_ps(p2[i] + dx + 4), _mm_loadu_ps(&p2g2e1));
+                for(int i = 0, ij = 0; i < nr_id; ++i)
+                {
+                    float p1g2e1 = 1.0f - gammap2 * (e1 - lambda3[i]);
+                    float p2g2e1 = 1.0f - gammap2 * (e2 - lambda3[i]);
+                    __m128 XMMp10 = _mm_mul_ps(_mm_loadu_ps(p1[i] + dx), _mm_load1_ps(&p1g2e1));
+                    __m128 XMMp11 = _mm_mul_ps(_mm_loadu_ps(p1[i] + dx + 4), _mm_load1_ps(&p1g2e1));
+                    __m128 XMMp20 = _mm_mul_ps(_mm_loadu_ps(p2[i] + dx), _mm_load1_ps(&p2g2e1));
+                    __m128 XMMp21 = _mm_mul_ps(_mm_loadu_ps(p2[i] + dx + 4), _mm_load1_ps(&p2g2e1));
 
-                    XMMp10 = _mm_sub_ps(XMMp10, _mm_mul_ps(_mm_loadu_ps(&p1g2e), XMMsum10));
-                    XMMp11 = _mm_sub_ps(XMMp11, _mm_mul_ps(_mm_loadu_ps(&p1g2e), XMMsum11));
-                    XMMp20 = _mm_sub_ps(XMMp20, _mm_mul_ps(_mm_loadu_ps(&p2g2e), XMMsum20));
-                    XMMp21 = _mm_sub_ps(XMMp21, _mm_mul_ps(_mm_loadu_ps(&p2g2e), XMMsum21));
+                    float g2e1 = gammap2 * e1;
+                    float g2e2 = gammap2 * e2;
+                    XMMp10 = _mm_add_ps(XMMp10, _mm_mul_ps(_mm_load1_ps(&g2e1), XMMsum10));
+                    XMMp11 = _mm_add_ps(XMMp11, _mm_mul_ps(_mm_load1_ps(&g2e1), XMMsum11));
+                    XMMp20 = _mm_add_ps(XMMp20, _mm_mul_ps(_mm_load1_ps(&g2e2), XMMsum20));
+                    XMMp21 = _mm_add_ps(XMMp21, _mm_mul_ps(_mm_load1_ps(&g2e2), XMMsum21));
 
-                    for(int j = 0, ij; j < nr_id; ++j) {
-                        if(j < i)ij = (i + 1) * i / 2 + j;
-                        else ij = (j + 1) * j / 2 + i;
-                        if(f[i][j] != 0.0f) {
-                            float p1g2e2 = gammap * 2 * lambda2[ij] * f[i][j];
-                            XMMp10 = _mm_sub_ps(XMMp10, _mm_mul_ps(_mm_loadu_ps(&p1g2e2), _mm_loadu_ps(p2[j] + dx)));
-                            XMMp11 = _mm_sub_ps(XMMp11, _mm_mul_ps(_mm_loadu_ps(&p1g2e2), _mm_loadu_ps(p2[j] + dx + 4)));
+                    for(int j = 0; j < nr_id; ++j, ++ij)
+                    {
+                        if(f[i][j] != 0.0f)
+                        {
+                            float p1g2e2 = gammap2 * lambda2[ij] * f[i][j];
+                            XMMp10 = _mm_add_ps(XMMp10, _mm_mul_ps(_mm_load1_ps(&p1g2e2), _mm_loadu_ps(p2[j] + dx)));
+                            XMMp11 = _mm_add_ps(XMMp11, _mm_mul_ps(_mm_load1_ps(&p1g2e2), _mm_loadu_ps(p2[j] + dx + 4)));
                         }
-                        if(f[j][i] != 0.0f) {
-                            float p2g2e2 = gammap * 2 * lambda2[ij] * f[j][i];
-                            XMMp20 = _mm_sub_ps(XMMp20, _mm_mul_ps(_mm_loadu_ps(&p2g2e2), _mm_loadu_ps(p1[j] + dx)));
-                            XMMp21 = _mm_sub_ps(XMMp21, _mm_mul_ps(_mm_loadu_ps(&p2g2e2), _mm_loadu_ps(p1[j] + dx + 4)));
+                        if(f[j][i] != 0.0f)
+                        {
+                            float p2g2e2 = gammap2 * lambda2[ij] * f[j][i];
+                            XMMp20 = _mm_add_ps(XMMp20, _mm_mul_ps(_mm_load1_ps(&p2g2e2), _mm_loadu_ps(p1[j] + dx)));
+                            XMMp21 = _mm_add_ps(XMMp21, _mm_mul_ps(_mm_load1_ps(&p2g2e2), _mm_loadu_ps(p1[j] + dx + 4)));
                         }
                     }
 
@@ -1032,33 +1015,39 @@ void sgd(GridMatrix<nr_id> *TrG, Model<nr_id> *model, Scheduler<nr_id> *schedule
                     _mm_storeu_ps(p2[i] + dx + 4, XMMp21);
                 }
             }
-            for(; dx < dim; dx += 4) {
+            for(; dx < dim; dx += 4)
+            {
                 __m128 XMMsum10 = _mm_setzero_ps();  // sum(p1)
                 __m128 XMMsum20 = _mm_setzero_ps();  // sum(p2)
-                for(int i = 0; i < nr_id; ++i) {
+                for(int i = 0; i < nr_id; ++i)
+                {
                     XMMsum10 = _mm_add_ps(XMMsum10, _mm_loadu_ps(p1[i] + dx));
                     XMMsum20 = _mm_add_ps(XMMsum20, _mm_loadu_ps(p2[i] + dx));
                 }
 
-                for(int i = 0; i < nr_id; ++i) {
-                    float p1g2e1 = p1g2e + 1.0f + lambda3[i];
-                    float p2g2e1 = p2g2e + 1.0f + lambda3[i];
-                    __m128 XMMp10 = _mm_mul_ps(_mm_loadu_ps(p1[i] + dx), _mm_loadu_ps(&p1g2e1));
-                    __m128 XMMp20 = _mm_mul_ps(_mm_loadu_ps(p2[i] + dx), _mm_loadu_ps(&p2g2e1));
+                for(int i = 0, ij = 0; i < nr_id; ++i)
+                {
+                    float p1g2e1 = 1.0f - gammap2 * (e1 - lambda3[i]);
+                    float p2g2e1 = 1.0f - gammap2 * (e2 - lambda3[i]);
+                    __m128 XMMp10 = _mm_mul_ps(_mm_loadu_ps(p1[i] + dx), _mm_load1_ps(&p1g2e1));
+                    __m128 XMMp20 = _mm_mul_ps(_mm_loadu_ps(p2[i] + dx), _mm_load1_ps(&p2g2e1));
 
-                    XMMp10 = _mm_sub_ps(XMMp10, _mm_mul_ps(_mm_loadu_ps(&p1g2e), XMMsum10));
-                    XMMp20 = _mm_sub_ps(XMMp20, _mm_mul_ps(_mm_loadu_ps(&p2g2e), XMMsum20));
+                    float g2e1 = gammap2 * e1;
+                    float g2e2 = gammap2 * e2;
+                    XMMp10 = _mm_add_ps(XMMp10, _mm_mul_ps(_mm_load1_ps(&g2e1), XMMsum10));
+                    XMMp20 = _mm_add_ps(XMMp20, _mm_mul_ps(_mm_load1_ps(&g2e2), XMMsum20));
 
-                    for(int j = 0, ij; j < nr_id; ++j) {
-                        if(j < i)ij = (i + 1) * i / 2 + j;
-                        else ij = (j + 1) * j / 2 + i;
-                        if(f[i][j] != 0.0f) {
-                            float p1g2e2 = gammap * 2 * lambda2[ij] * f[i][j];
-                            XMMp10 = _mm_sub_ps(XMMp10, _mm_mul_ps(_mm_loadu_ps(&p1g2e2), _mm_loadu_ps(p2[j] + dx)));
+                    for(int j = 0; j < nr_id; ++j, ++ij)
+                    {
+                        if(f[i][j] != 0.0f)
+                        {
+                            float p1g2e2 = gammap2 * lambda2[ij] * f[i][j];
+                            XMMp10 = _mm_add_ps(XMMp10, _mm_mul_ps(_mm_load1_ps(&p1g2e2), _mm_loadu_ps(p2[j] + dx)));
                         }
-                        if(f[j][i] != 0.0f) {
-                            float p2g2e2 = gammap * 2 * lambda2[ij] * f[j][i];
-                            XMMp20 = _mm_sub_ps(XMMp20, _mm_mul_ps(_mm_loadu_ps(&p2g2e2), _mm_loadu_ps(p1[j] + dx)));
+                        if(f[j][i] != 0.0f)
+                        {
+                            float p2g2e2 = gammap2 * lambda2[ij] * f[j][i];
+                            XMMp20 = _mm_add_ps(XMMp20, _mm_mul_ps(_mm_load1_ps(&p2g2e2), _mm_loadu_ps(p1[j] + dx)));
                         }
                     }
 
@@ -1066,206 +1055,33 @@ void sgd(GridMatrix<nr_id> *TrG, Model<nr_id> *model, Scheduler<nr_id> *schedule
                     _mm_storeu_ps(p2[i] + dx, XMMp20);
                 }
             }
-            //for(; dx < dim; dx += 4) {
-            //    __m128 XMMsum0 = _mm_setzero_ps();
-            //    for(int i = 0; i < nr_id; ++i) {
-            //        XMMsum0 = _mm_add_ps(XMMsum0, _mm_loadu_ps(p1[i] + dx));
-            //    }
 
-            //    for(int i = 0; i < nr_id; ++i) {
-            //        __m128 _XMMp0 = _mm_loadu_ps(p1[i] + dx);
-            //        __m128 XMMp0 = _mm_mul_ps(_mm_sub_ps(_XMMp0, XMMsum0), XMMe1);
-            //        for(int j = 0; j < i; ++j) {
-            //            XMMp0 = _mm_sub_ps(XMMp0, _mm_mul_ps(XMMlambda2[(i + 1) * i / 2 + j], _mm_mul_ps(XMMf[i][j], _mm_loadu_ps(p2[j] + dx))));
-            //        }
-            //        for(int j = i; j < nr_id; ++j) {
-            //            XMMp0 = _mm_sub_ps(XMMp0, _mm_mul_ps(XMMlambda2[(j + 1) * j / 2 + i], _mm_mul_ps(XMMf[i][j], _mm_loadu_ps(p2[j] + dx))));
-            //        }
-            //        XMMp0 = _mm_add_ps(XMMp0, _mm_mul_ps(XMMlambda3[i], _XMMp0));
-            //        XMMp0 = _mm_add_ps(_XMMp0, _mm_mul_ps(XMMg2p, XMMp0));
-            //        _mm_storeu_ps(p1[i] + dx, XMMp0);
-            //    }
-            //}
-
-            //float ge[4];
-            //float ge;
-            //_mm_storeu_ps(ge, XMMge);
-            //for(int i = 0; i < nr_id; ++i) {                    // 更新：b[i] = gl[i] * b[i] + ge;
-            //if(en_b[i])(*b[i]) = model->gl[i] * (*b[i]) + ge[0];
-            //}
-            for(int i = 0; i < nr_id; ++i) {
-                if(en_b[i]) {
-                    float temp1 = 0, temp2 = 0;
+            for(int i = 0; i < nr_id; ++i)
+            {
+                if(en_b[i])
+                {
+                    float l4f1 = 0, l4f2 = 0;
                     int ij = 0;
-                    for(int j = 0; j < nr_id; ++j, ++ij) {
-                        temp1 -= lambda4[ij] * f[i][j];
-                        temp2 -= lambda4[ij] * f[j][i];
+                    for(int j = 0; j < nr_id; ++j, ++ij)
+                    {
+                        l4f1 -= lambda4[ij] * f[i][j];
+                        l4f2 -= lambda4[ij] * f[j][i];
                     }
-                    b1[i] += gammab * 2 * (-e1 - temp1 + lambda5[i] * b1[i]);
-                    b2[i] += gammab * 2 * (-e2 - temp2 + lambda5[i] * b2[i]);
+                    *(b1[i]) -= gammab * 2 * (-e1 - l4f1 + lambda5[i] * (*(b1[i])));
+                    *(b2[i]) -= gammab * 2 * (-e2 - l4f2 + lambda5[i] * (*(b2[i])));
                 }
             }
         }
 
-
-        //XMMge = _mm_mul_ps(XMMge, XMMg); // ge *= gamma
-
-        //for(dx = 0; dx < dim - 7; dx += 8) {				// 更新：pqi = ge * (sum(pq) - pqi) + gli * pqi
-        //    __m128 XMMsum0 = _mm_setzero_ps();
-        //    __m128 XMMsum1 = _mm_setzero_ps();
-        //    for(int i = 0; i < nr_id; ++i) {
-        //        XMMsum0 = _mm_add_ps(XMMsum0, _mm_loadu_ps(pq[i] + dx));
-        //        XMMsum1 = _mm_add_ps(XMMsum1, _mm_loadu_ps(pq[i] + dx + 4));
-        //    }
-        //    for(int i = 0; i < nr_id; ++i) {
-        //        __m128 XMMpq0 = _mm_loadu_ps(pq[i] + dx);
-        //        __m128 XMMpq1 = _mm_loadu_ps(pq[i] + dx + 4);
-        //        XMMpq0 = _mm_add_ps(_mm_mul_ps(XMMge, _mm_sub_ps(XMMsum0, XMMpq0)), _mm_mul_ps(XMMgl[i], XMMpq0));
-        //        XMMpq1 = _mm_add_ps(_mm_mul_ps(XMMge, _mm_sub_ps(XMMsum1, XMMpq1)), _mm_mul_ps(XMMgl[i], XMMpq1));
-        //        _mm_storeu_ps(pq[i] + dx, XMMpq0);
-        //        _mm_storeu_ps(pq[i] + dx + 4, XMMpq1);
-        //    }
-        //}
-        //for(; dx < dim; dx += 4) {
-        //    __m128 XMMsum0 = _mm_setzero_ps();
-        //    for(int i = 0; i < nr_id; ++i) {
-        //        XMMsum0 = _mm_add_ps(XMMsum0, _mm_loadu_ps(pq[i] + dx));
-        //    }
-        //    for(int i = 0; i < nr_id; ++i) {
-        //        __m128 XMMpq0 = _mm_loadu_ps(pq[i] + dx);
-        //        XMMpq0 = _mm_add_ps(_mm_mul_ps(XMMge, _mm_sub_ps(XMMsum0, XMMpq0)), _mm_mul_ps(XMMgl[i], XMMpq0));
-        //        _mm_storeu_ps(pq[i] + dx, XMMpq0);
-        //    }
-        //}
-
-        //float ge[4];
-        ////float ge;
-        //_mm_storeu_ps(ge, XMMge);
-        //for(int i = 0; i < nr_id; ++i) {                    // 更新：b[i] = gl[i] * b[i] + ge;
-        //    if(en_b[i])(*b[i]) = model->gl[i] * (*b[i]) + ge[0];
-        //}
-        //}
-        //_mm_store_sd(&loss, XMMl);
         scheduler->put_job(jid, loss);
         scheduler->pause();
         if(scheduler->is_terminated()) break;
     }
 }
 
-//while(true) {
-//    jid = scheduler->get_job();
-//    rn = TrG->GMS[jid]->M;
-//    nr_rs = TrG->GMS[jid]->nr_rs;
-//    XMMl = _mm_setzero_pd();
-//    for(mx = 0; mx < nr_rs; mx++) {						// 每次更新一个分数记录: P[id[0~(nr_id-1)]], loss
-//        r = rn;
-//        rn++;
-//        __m128 XMMr = _mm_load1_ps(&r->rate), XMMge = _mm_setzero_ps();
-//        for(int i = 0; i < nr_id; ++i) {
-//            pq[i] = P[i] + r->id[i] * dim;
-//            b[i] = B[i] + r->id[i];
-//        }
-//        //_mm_prefetch((const char *)(r), _MM_HINT_T0);
-//        //for(int i = 0; i < nr_id; ++i) {
-//        //    _mm_prefetch((const char *)(pq[i]), _MM_HINT_T0);
-//        //}
-//        //if(mx + 7 < nr_rs) {
-//        //    _mm_prefetch((const char *)(r + 7), _MM_HINT_T1);
-//        //    for(int i = 0; i < nr_id; ++i) {
-//        //        _mm_prefetch((const char *)(P[i] + (r + 7)->id[i] * dim), _MM_HINT_T1);
-//        //    }
-//        //    if(mx + 15 < nr_rs) {
-//        //        _mm_prefetch((const char *)(r + 15), _MM_HINT_T2);
-//        //        for(int i = 0; i < nr_id; ++i) {
-//        //            _mm_prefetch((const char *)(P[i] + (r + 15)->id[i] * dim), _MM_HINT_T2);
-//        //        }
-//        //    }
-//        //}
-
-//        // TODO: ???????????l += sum((Qij - pq[i]^2 - b[i] - b[j] - avgx)^2)
-//        // TODO: ???????????l += sum((pq[i]^2) + sum(b[i]^2)
-
-//        for(int i = 0; i < nr_id; ++i) {					// ge += sum(pqi * pqj)
-//            for(int j = i + 1; j < nr_id; ++j) {
-//                for(dx = 0; dx < dim - 7; dx += 8) {
-//                    __m128 XMMp0 = _mm_loadu_ps(pq[i] + dx);
-//                    __m128 XMMq0 = _mm_loadu_ps(pq[j] + dx);
-//                    __m128 XMMp1 = _mm_loadu_ps(pq[i] + dx + 4);
-//                    __m128 XMMq1 = _mm_loadu_ps(pq[j] + dx + 4);
-//                    XMMp0 = _mm_mul_ps(XMMp0, XMMq0);
-//                    XMMp1 = _mm_mul_ps(XMMp1, XMMq1);
-//                    XMMge = _mm_add_ps(XMMge, _mm_add_ps(XMMp0, XMMp1));
-//                }
-//                for(; dx < dim; dx += 4) {
-//                    __m128 XMMp0 = _mm_loadu_ps(pq[i] + dx);
-//                    __m128 XMMq0 = _mm_loadu_ps(pq[j] + dx);
-//                    XMMge = _mm_add_ps(XMMge, _mm_mul_ps(XMMp0, XMMq0));
-//                }
-//            }
-//        }
-//        XMMge = _mm_hadd_ps(XMMge, XMMge);
-//        XMMge = _mm_hadd_ps(XMMge, XMMge);
-
-//        for(int i = 0; i < nr_id; ++i) {					// ge += sum(bias)
-//            if(en_b[i])XMMge = _mm_add_ps(XMMge, _mm_load1_ps(b[i]));
-//        }
-
-//        XMMge = _mm_sub_ps(XMMr, _mm_add_ps(XMMge, XMMavg));// ge = r - (ge + avg1)
-//        XMMl = _mm_add_pd(XMMl, _mm_cvtps_pd(_mm_mul_ps(XMMge, XMMge))); // l += (double)(ge^2)
-
-//        XMMge = _mm_mul_ps(XMMge, XMMg); // ge *= gamma
-
-//        for(dx = 0; dx < dim - 7; dx += 8) {				// 更新：pqi = ge * (sum(pq) - pqi) + gli * pqi
-//            __m128 XMMsum0 = _mm_setzero_ps();
-//            __m128 XMMsum1 = _mm_setzero_ps();
-//            for(int i = 0; i < nr_id; ++i) {
-//                XMMsum0 = _mm_add_ps(XMMsum0, _mm_loadu_ps(pq[i] + dx));
-//                XMMsum1 = _mm_add_ps(XMMsum1, _mm_loadu_ps(pq[i] + dx + 4));
-//            }
-//            for(int i = 0; i < nr_id; ++i) {
-//                __m128 XMMpq0 = _mm_loadu_ps(pq[i] + dx);
-//                __m128 XMMpq1 = _mm_loadu_ps(pq[i] + dx + 4);
-//                XMMpq0 = _mm_add_ps(_mm_mul_ps(XMMge, _mm_sub_ps(XMMsum0, XMMpq0)), _mm_mul_ps(XMMgl[i], XMMpq0));
-//                XMMpq1 = _mm_add_ps(_mm_mul_ps(XMMge, _mm_sub_ps(XMMsum1, XMMpq1)), _mm_mul_ps(XMMgl[i], XMMpq1));
-//                _mm_storeu_ps(pq[i] + dx, XMMpq0);
-//                _mm_storeu_ps(pq[i] + dx + 4, XMMpq1);
-//            }
-//        }
-//        for(; dx < dim; dx += 4) {
-//            __m128 XMMsum0 = _mm_setzero_ps();
-//            for(int i = 0; i < nr_id; ++i) {
-//                XMMsum0 = _mm_add_ps(XMMsum0, _mm_loadu_ps(pq[i] + dx));
-//            }
-//            for(int i = 0; i < nr_id; ++i) {
-//                __m128 XMMpq0 = _mm_loadu_ps(pq[i] + dx);
-//                XMMpq0 = _mm_add_ps(_mm_mul_ps(XMMge, _mm_sub_ps(XMMsum0, XMMpq0)), _mm_mul_ps(XMMgl[i], XMMpq0));
-//                _mm_storeu_ps(pq[i] + dx, XMMpq0);
-//            }
-//        }
-
-//        float ge[4];
-//        //float ge;
-//        _mm_storeu_ps(ge, XMMge);
-//        for(int i = 0; i < nr_id; ++i) {                    // 更新：b[i] = gl[i] * b[i] + ge;
-//            if(en_b[i])(*b[i]) = model->gl[i] * (*b[i]) + ge[0];
-//        }
-//    }
-//    _mm_store_sd(&loss, XMMl);
-//    scheduler->put_job(jid, loss);
-//    scheduler->pause();
-//    if(scheduler->is_terminated()) break;
-//}
-//delete[] P;
-//delete[] B;
-//delete[] p1;
-//delete[] b1;
-//delete[] p2;
-//delete[] b2;
-//delete[] en_b;
-//}
-
 template<int nr_id>
-void gsgd(GridMatrix<nr_id> *TrG, Model<nr_id> *model, Monitor<nr_id> *monitor) {
+void gsgd(GridMatrix<nr_id> *TrG, Model<nr_id> *model, Monitor<nr_id> *monitor)
+{
     printf("SGD Starts!\n");
     fflush(stdout);
 
@@ -1281,8 +1097,10 @@ void gsgd(GridMatrix<nr_id> *TrG, Model<nr_id> *model, Monitor<nr_id> *monitor) 
     monitor->print_header();
 
     // output loss for each iteration
-    while(iter <= model->iter) {
-        if(scheduler->get_total_jobs() >= iter * TrG->nr_gbs_a) {
+    while(iter <= model->iter)
+    {
+        if(scheduler->get_total_jobs() >= iter * TrG->nr_gbs_a)
+        {
             scheduler->pause_sgd();
             float iter_time = clock.toc();
             double loss = scheduler->get_loss();
@@ -1306,9 +1124,8 @@ void gsgd(GridMatrix<nr_id> *TrG, Model<nr_id> *model, Monitor<nr_id> *monitor) 
 }
 
 template<int nr_id>
-void train(int argc, char **argv) {
-    Similarity<nr_id> similarity;
-    similarity.generate(10000, 1000);
+void train(int argc, char **argv)
+{
     // get options from argv
     Model<nr_id> model;// = new Model<nr_id>;
     Monitor<nr_id> monitor;// = new Monitor<nr_id>;
@@ -1321,19 +1138,26 @@ void train(int argc, char **argv) {
 
     // create validation matrix
     Matrix<nr_id> *Va = NULL;
-    if(option.va_path) {
+    if(option.va_path)
+    {
         if(model.en_rand_shuffle)
             Va = new Matrix<nr_id>(option.va_path, model.map_f);
         else Va = new Matrix<nr_id>(option.va_path);
     }
-    if(Va) {
-        for(int i = 0; i < nr_id; ++i) {
-            if(Va->nr_s[i] > Tr.nr_s[i]) {
+    if(Va)
+    {
+        for(int i = 0; i < nr_id; ++i)
+        {
+            if(Va->nr_s[i] > Tr.nr_s[i])
+            {
                 fprintf(stderr, "Validation set out of range.\n");
                 exit(1);
             }
         }
     }
+
+    Similarity<nr_id> similarity;
+    //similarity.generate(10000, 1000);
 
     // shuffle the model
     if(model.en_rand_shuffle) model.shuffle();
