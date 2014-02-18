@@ -1,16 +1,24 @@
 #include "header.h"
 using namespace std;
 
+// generate sample ratings and similarities
 template<int nr_id>
-void generate(int argc, char **argv)    // generate sample ratings and similarities
+void generate(int argc, char **argv)    // generate (config file) (output rating file) (output similarity prefix)
 {
-    stringstream filename;
+
+    // format of config file:
+    // 1. number of record
+    // 2. limit of rating
+    // 3. number of ids of each dimension
+    // 4. number of similarities of each dimension
 
     cout << "Reading configs...";
-    filename.str("");
-    filename << argv[2] << ".cfg";
-    ifstream fin(filename.str());
-    if(!fin)return;
+    ifstream fin(argv[2]);
+    if(!fin)
+    {
+        cout << "Failed" << endl;
+        return;
+    }
     int nr_rs, nr_s[nr_id];
     int nr_sim[(1 + nr_id)*nr_id / 2];
     float ratelimit;
@@ -28,11 +36,13 @@ void generate(int argc, char **argv)    // generate sample ratings and similarit
     cout << "Done" << endl;
 
     cout << "Generating ratings...";
-    filename.str("");
-    filename << argv[3] << ".tsv";
-    ofstream fout(filename.str());
-    if(!fout)return;
-    std::unordered_set<ArrayIndex<int, nr_id>,  Arrayhash<ArrayIndex<int, nr_id>>, Arrayequal<ArrayIndex<int, nr_id>>> rateDic;
+    ofstream fout(argv[3]);
+    if(!fout)
+    {
+        cout << "Failed" << endl;
+        return;
+    }
+    std::unordered_set<ArrayIndex<int, nr_id>, Arrayhash<ArrayIndex<int, nr_id>>, Arrayequal<ArrayIndex<int, nr_id>>> rateDic;
     ArrayIndex<int, nr_id> record;
     srand(unsigned(time_t(NULL)));
     srand48(unsigned(time_t(NULL)));
@@ -55,21 +65,36 @@ void generate(int argc, char **argv)    // generate sample ratings and similarit
     cout << "Done" << endl;
 
     cout << "Generating similarities...";
+    stringstream filename;
     for(int i = 0, ij = 0; i < nr_id; ++i)
     {
         for(int j = 0; j <= i; ++j, ++ij)
         {
             if(nr_sim[ij] <= 0)continue;
             filename.str("");
-            filename << argv[4] << "_" << i << "_" << j << ".tsv";
+            filename << argv[4] << "_" << ij << ".tsv";
             fout.open(filename.str());
-            if(!fout)return;
+            if(!fout)
+            {
+                cout << "Failed" << endl;
+                return;
+            }
             std::unordered_set<ArrayIndex<int, 2>, Arrayhash<ArrayIndex<int, 2>>, Arrayequal<ArrayIndex<int, 2>>> simDic;
             ArrayIndex<int, 2> sim;
             for(int k = 0; k < nr_sim[ij];)
             {
                 sim.id[0] = rand() % nr_s[i];
                 sim.id[1] = rand() % nr_s[j];
+                if(i == j)
+                {
+                    if(sim.id[0] > sim.id[1])
+                    {
+                        int temp = sim.id[0];
+                        sim.id[0] = sim.id[1];
+                        sim.id[1] = temp;
+                    }
+                    else if(sim.id[0] == sim.id[1])continue;
+                }
                 auto it = simDic.find(sim);
                 if(it == simDic.end())
                 {

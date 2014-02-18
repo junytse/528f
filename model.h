@@ -46,19 +46,18 @@ struct Similarity
     std::vector<Node<2>> M[(1 + nr_id)*nr_id / 2];
     bool en_sim[(1 + nr_id)*nr_id / 2];
     Similarity();
-    Similarity(char *path, int **map = NULL);
+    Similarity(char *path, bool *_en_sim, int **map = NULL);
     void read(char *path, int **map);
-    void generate(int, int);
 };
 
 template<int nr_id>
 struct Model
 {
-    int nr_s[nr_id],                            // Number of each dimension
-        dim,                                    // latent factor
+    int dim,                                    // latent factor
         dim_off,                                // latent factor £¨4µÄ±¶Êý£©
         nr_thrs,                                // Number of threads
         iter,                                   // Number of iterations
+        nr_s[nr_id],                            // Number of each dimension
         nr_gbs[nr_id],                          // Number of blocks for each dimension
         *map_f[nr_id],                          // Mapper
         *map_b[nr_id];                          // Reverse mapper
@@ -219,8 +218,9 @@ template<int nr_id>
 Similarity<nr_id>::Similarity() {}
 
 template<int nr_id>
-Similarity<nr_id>::Similarity(char *path, int **map = NULL)
+Similarity<nr_id>::Similarity(char *path, bool *_en_sim, int **map = NULL)
 {
+    memcpy(en_sim, _en_sim, (sizeof(bool)) * (1 + nr_id) * nr_id / 2);
     read(path, map);
 }
 
@@ -235,8 +235,9 @@ void Similarity<nr_id>::read(char *path, int **map)
     {
         for(int j = 0; j <= i; ++j, ++ij)
         {
+            if(!en_sim[ij])continue;
             filename.str("");
-            filename << path << "_" << ij;
+            filename << path << "_" << ij << ".tsv";
             std::ifstream fin(filename.str());
             if(!fin)
             {
@@ -244,7 +245,6 @@ void Similarity<nr_id>::read(char *path, int **map)
                 printf("Similarity file %d not exists", ij);
                 continue;
             }
-            en_sim[ij] = true;
             while(fin >> ka >> kb >> val)
             {
                 if(map)
@@ -270,38 +270,38 @@ void Similarity<nr_id>::read(char *path, int **map)
     }
 }
 
-template<int nr_id>
-void Similarity<nr_id>::generate(int recordNum, int termNum)
-{
-    srand(unsigned(time(NULL)));
-    Node<2> node;
-    int ka, kb;
-    for(int i = 0, ij = 0; i < nr_id; ++i)
-    {
-        for(int j = 0; j <= i; ++j, ++ij)
-        {
-            en_sim[ij] = true;
-            for(int c = 0; c < recordNum; ++c)
-            {
-                ka = rand() % termNum;
-                kb = rand() % termNum;
-                if(ka < kb || i != j)
-                {
-                    node.id[0] = ka;
-                    node.id[1] = kb;
-                }
-                else
-                {
-                    node.id[0] = kb;
-                    node.id[1] = ka;
-                }
-                if(i != j || ka != kb)node.rate = float(rand()) / RAND_MAX;
-                else node.rate = 1.0f;
-                M[ij].push_back(node);
-            }
-        }
-    }
-}
+//template<int nr_id>
+//void Similarity<nr_id>::generate(int recordNum, int termNum)
+//{
+//    srand(unsigned(time(NULL)));
+//    Node<2> node;
+//    int ka, kb;
+//    for(int i = 0, ij = 0; i < nr_id; ++i)
+//    {
+//        for(int j = 0; j <= i; ++j, ++ij)
+//        {
+//            en_sim[ij] = true;
+//            for(int c = 0; c < recordNum; ++c)
+//            {
+//                ka = rand() % termNum;
+//                kb = rand() % termNum;
+//                if(ka < kb || i != j)
+//                {
+//                    node.id[0] = ka;
+//                    node.id[1] = kb;
+//                }
+//                else
+//                {
+//                    node.id[0] = kb;
+//                    node.id[1] = ka;
+//                }
+//                if(i != j || ka != kb)node.rate = float(rand()) / RAND_MAX;
+//                else node.rate = 1.0f;
+//                M[ij].push_back(node);
+//            }
+//        }
+//    }
+//}
 
 template<int nr_id>
 Model<nr_id>::Model(): en_rand_shuffle(false), en_avg(false),  avg(0.0f), dim(0), dim_off(0), nr_thrs(0), iter(0)
@@ -348,11 +348,6 @@ void Model<nr_id>::initialize(const Matrix<nr_id> &Tr)
     srand48(unsigned(time(NULL)));
     for(int i = 0; i < nr_id; ++i)
     {
-        //srand48(0L);
-        // assign gl = 1 - gamma * l
-        //gl[i] = 1 - gamma * l[i];
-        //glb[i] = 1 - gamma * lb[i];
-
         // assign P
         P[i] = new float[nr_s[i] * dim_off];
         float *p = P[i];
@@ -371,19 +366,6 @@ void Model<nr_id>::initialize(const Matrix<nr_id> &Tr)
             for(int j = 0; j < nr_s[i]; ++j)B[i][j] = 0.0f;
         }
 
-        // assign lambda3&5
-        lambda3[i] = 0.001f;
-        lambda5[i] = 0.001f;
-    }
-
-    // assign lambda2&4
-    for(int i = 0, ij = 0; i < nr_id; ++i)
-    {
-        for(int j = 0; j <= i; ++j, ++ij)
-        {
-            lambda2[ij] = 0.01f;
-            lambda4[ij] = 0.01f;
-        }
     }
 
     printf("done. %.2f\n", clock.toc());
@@ -408,17 +390,21 @@ void Model<nr_id>::read_meta(FILE *f)
     fread(&dim_off, sizeof(int), 1, f);
     fread(&nr_thrs, sizeof(int), 1, f);
     fread(&iter, sizeof(int), 1, f);
-    //fread(&gamma, sizeof(float), 1, f);
-    fread(&avg, sizeof(float), 1, f);
-    fread(&en_rand_shuffle, sizeof(bool), 1, f);
-    fread(&en_avg, sizeof(bool), 1, f);
     fread(nr_s, sizeof(int), nr_id, f);
     fread(nr_gbs, sizeof(int), nr_id, f);
-    //fread(l, sizeof(float), nr_id, f);
-    //fread(lb, sizeof(float), nr_id, f);
-    //fread(gl, sizeof(float), nr_id, f);
-    //fread(glb, sizeof(float), nr_id, f);
-    fread(en_b, sizeof(bool), nr_id, f);
+
+    fread(&gammap, sizeof(float), 1, f);
+    fread(&gammab, sizeof(float), 1, f);
+    fread(&avg, sizeof(float), 1, f);
+    fread(lambda2, sizeof(int), (1 + nr_id) * nr_id / 2, f);
+    fread(lambda3, sizeof(int), nr_id, f);
+    fread(lambda4, sizeof(int), (1 + nr_id) * nr_id / 2, f);
+    fread(lambda5, sizeof(int), nr_id, f);
+
+    fread(&en_rand_shuffle, sizeof(bool), 1, f);
+    fread(&en_avg, sizeof(bool), 1, f);
+    fread(en_b, sizeof(int), nr_id, f);
+    fread(en_sim, sizeof(int), (1 + nr_id) * nr_id / 2, f);
 }
 
 template<int nr_id>
@@ -443,6 +429,10 @@ void Model<nr_id>::read(char *path)
             B[i] = new float[nr_s[i]];
             fread(B[i], sizeof(float), nr_s[i], f);
         }
+        else
+        {
+            B[i] = NULL;
+        }
     }
     if(en_rand_shuffle)
     {
@@ -452,6 +442,14 @@ void Model<nr_id>::read(char *path)
             map_b[i] = new int[nr_s[i]];
             fread(map_f[i], sizeof(int), nr_s[i], f);
             fread(map_b[i], sizeof(int), nr_s[i], f);
+        }
+    }
+    else
+    {
+        for(int i = 0; i < nr_id; ++i)
+        {
+            map_f[i] = NULL;
+            map_b[i] = NULL;
         }
     }
 
@@ -479,17 +477,22 @@ void Model<nr_id>::write(char *path)
     fwrite(&dim_off, sizeof(int), 1, f);
     fwrite(&nr_thrs, sizeof(int), 1, f);
     fwrite(&iter, sizeof(int), 1, f);
-    //fwrite(&gamma, sizeof(float), 1, f);
-    fwrite(&avg, sizeof(float), 1, f);
-    fwrite(&en_rand_shuffle, sizeof(bool), 1, f);
-    fwrite(&en_avg, sizeof(bool), 1, f);
     fwrite(nr_s, sizeof(int), nr_id, f);
     fwrite(nr_gbs, sizeof(int), nr_id, f);
-    //fwrite(l, sizeof(float), nr_id, f);
-    //fwrite(lb, sizeof(float), nr_id, f);
-    //fwrite(gl, sizeof(float), nr_id, f);
-    //fwrite(glb, sizeof(float), nr_id, f);
+
+    fwrite(&gammap, sizeof(float), 1, f);
+    fwrite(&gammab, sizeof(float), 1, f);
+    fwrite(&avg, sizeof(float), 1, f);
+    fwrite(lambda2, sizeof(int), (1 + nr_id) * nr_id / 2, f);
+    fwrite(lambda3, sizeof(int), nr_id, f);
+    fwrite(lambda4, sizeof(int), (1 + nr_id) * nr_id / 2, f);
+    fwrite(lambda5, sizeof(int), nr_id, f);
+
+    fwrite(&en_rand_shuffle, sizeof(bool), 1, f);
+    fwrite(&en_avg, sizeof(bool), 1, f);
     fwrite(en_b, sizeof(bool), nr_id, f);
+    fwrite(en_sim, sizeof(int), (1 + nr_id) * nr_id / 2, f);
+
     for(int i = 0; i < nr_id; ++i)
     {
         fwrite(P[i], sizeof(float), nr_s[i] * dim_off, f);
@@ -609,7 +612,7 @@ float calc_rate(Model<nr_id> *model, Node<nr_id> *r)
             rate += std::inner_product(
                         &model->P[i][r->id[i] * model->dim_off],
                         &model->P[i][r->id[i] * model->dim_off] + model->dim,
-                        &model->P[j][r->id[j] * model->dim_off], 0.0F);
+                        &model->P[j][r->id[j] * model->dim_off], 0.0f);
         }
         if(model->en_b[i])rate += model->B[i][r->id[i]];
     }

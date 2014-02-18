@@ -79,8 +79,19 @@ double Monitor<nr_id>::calc_reg()
     {
         reg = 0;
         for(int j = 0; j < model->nr_s[i]; ++j)
+        {
             reg += nr_tr_srs[i][j] * std::inner_product(&model->P[i][j * model->dim_off], &model->P[i][j * model->dim_off] + model->dim, &model->P[i][j * model->dim_off], 0.0);
-        //result += reg * model->l[i];
+        }
+        result += reg * model->lambda3[i];
+        if(model->en_b[i])
+        {
+            reg = 0;
+            for(int j = 0; j < model->nr_s[i]; ++j)
+            {
+                reg += nr_tr_srs[i][j] * model->B[i][j];
+            }
+            result += reg * model->lambda5[i];
+        }
     }
     return result;
 }
@@ -102,203 +113,89 @@ Monitor<nr_id>::~Monitor()
 template<int nr_id>
 struct TrainOption
 {
-    char *tr_path, *va_path, *model_path;
+    char *tr_path, *va_path, *sim_prefix, *model_path;
     TrainOption(int argc, char **argv, Model<nr_id> *model, Monitor<nr_id> *monitor);
-    static void exit_train();
-    ~TrainOption();
 };
 
 template<int nr_id>
-TrainOption<nr_id>::TrainOption(int argc, char **argv, Model<nr_id> *model, Monitor<nr_id> *monitor) : va_path(NULL), tr_path(NULL), model_path(NULL)
+TrainOption<nr_id>::TrainOption(int argc, char **argv, Model<nr_id> *model, Monitor<nr_id> *monitor)    // train (config file) (input rating data file) (input similarity prefix) (output model file)
+    : va_path(NULL), tr_path(NULL), model_path(NULL), sim_prefix(NULL)
 {
-    model->dim = 4; // Ô¤ÉèÖµ
-    model->nr_thrs = 1;
-    model->iter = 40;
-    //model->gamma = 0.001f;
-    //model->avg = 0.0f;
-    model->en_rand_shuffle = false;
-    model->en_avg = true;
     monitor->en_show_tr_rmse = true;
     monitor->en_show_obj = true;
-    for(int i = 0; i < nr_id; ++i)
-    {
-        model->nr_gbs[i] = 2 * (model->nr_thrs);
-        //model->l[i] = 1;
-        //model->lb[i] = 1;
-        model->en_b[i] = false;
-    }
-    memset(model->en_sim, false, (1 + nr_id) * nr_id / 2 * sizeof(bool));
-    int i;
-    for(i = 2; i < argc; i++)
-    {
-        if(argv[i][0] != '-') break;
-        if(i + 1 >= argc) exit_train();
-        if(!strcmp(argv[i], "-k"))
-        {
-            model->dim = atoi(argv[++i]);
-            if(model->dim <= 0)
-            {
-                fprintf(stderr, "dimensions should > 0\n");
-                exit(1);
-            }
-        }
-        else if(!strcmp(argv[i], "-t"))
-        {
-            model->iter = atoi(argv[++i]);
-            if(model->iter <= 0)
-            {
-                fprintf(stderr, "iterations should > 0\n");
-                exit(1);
-            }
-        }
-        else if(!strcmp(argv[i], "-s"))
-        {
-            model->nr_thrs = atoi(argv[++i]);
-            if(model->nr_thrs <= 0)
-            {
-                fprintf(stderr, "number of threads should > 0\n");
-                exit(1);
-                std::cout << "EEE" << std::endl;
 
-            }
-        }
-        //else if(!strcmp(argv[i], "-g"))
-        //{
-        //    model->gamma = (float)atof(argv[++i]);
-        //    if(model->gamma <= 0)
-        //    {
-        //        fprintf(stderr, "learning rate should > 0\n");
-        //        exit(1);
-        //    }
-        //}
-        else if(!strcmp(argv[i], "-v")) va_path = argv[++i];
-        else if(!strcmp(argv[i], "-blk"))
-        {
-            model->nr_gbs[0] = atoi(strtok(argv[++i], "x"));
-            if(model->nr_gbs[0] <= 0)
-            {
-                fprintf(stderr, "number of blocks should > 0\n");
-                exit(1);
-            }
-            for(int j = 1; j < nr_id; ++j)
-            {
-                model->nr_gbs[j] = atoi(strtok(NULL, "x"));
-                if(model->nr_gbs[j] <= 0)
-                {
-                    fprintf(stderr, "number of blocks should > 0\n");
-                    exit(1);
-                }
-            }
-        }
-        else if(!strcmp(argv[i], "--rand-shuffle")) model->en_rand_shuffle = true;
-        else if(!strcmp(argv[i], "--no-rand-shuffle")) model->en_rand_shuffle = false;
-        else if(!strcmp(argv[i], "--tr-rmse")) monitor->en_show_tr_rmse = true;
-        else if(!strcmp(argv[i], "--no-tr-rmse")) monitor->en_show_tr_rmse = false;
-        else if(!strcmp(argv[i], "--obj")) monitor->en_show_obj = true;
-        else if(!strcmp(argv[i], "--no-obj")) monitor->en_show_obj = false;
-        else if(!strcmp(argv[i], "--use-avg")) model->en_avg = true;
-        else if(!strcmp(argv[i], "--no-use-avg")) model->en_avg = false;
-        //else if(!strcmp(argv[i], "--user-bias")) model->en_ub = true;
-        //else if(!strcmp(argv[i], "--no-user-bias")) model->en_ub = false;
-        //else if(!strcmp(argv[i], "--item-bias")) model->en_ib = true;
-        //else if(!strcmp(argv[i], "--no-item-bias")) model->en_ib = false;
-        //else if(!strcmp(argv[i], "-ub")) {
-        //    float lub = atof(argv[++i]);
-        //    if(lub < 0) model->en_ub = false;
-        //    else {
-        //        model->en_ub = true;
-        //        model->lub = lub;
-        //    }
-        //} else if(!strcmp(argv[i], "-ib")) {
-        //    float lib = atof(argv[++i]);
-        //    if(lib < 0) model->en_ib = false;
-        //    else {
-        //        model->en_ib = true;
-        //        model->lib = lib;
-        //    }
-        //} else if(!strcmp(argv[i], "-p")) {
-        //    model->lp = atof(argv[++i]);
-        //    if(model->lp < 0) {
-        //        fprintf(stderr, "cost should >= 0\n");
-        //        exit(1);
-        //    }
-        //} else if(!strcmp(argv[i], "-q")) {
-        //    model->lq = atof(argv[++i]);
-        //    if(model->lq < 0) {
-        //        fprintf(stderr, "cost should >= 0\n");
-        //        exit(1);
-        //    }
-        else
-        {
-            fprintf(stderr, "Invalid option: %s\n", argv[i]);
-            exit_train();
-        }
-    }
-    if(i >= argc) exit_train();
-    tr_path = argv[i++];
-    if(i < argc)
-    {
-        model_path = new char[strlen(argv[i]) + 1];
-        sprintf(model_path, "%s", argv[i]);
-    }
-    else
-    {
-        char *p = strrchr(argv[i - 1], '/');
-        if(p == NULL)
-            p = argv[i - 1];
-        else
-            ++p;
-        model_path = new char[strlen(p) + 7];
-        sprintf(model_path, "%s.model", p);
-    }
-    if(va_path)
-    {
-        FILE *f = fopen(va_path, "rb");    //Check if validation set exist.
-        if(!f) exit_file_error(va_path);
-        fclose(f);
-    }
-}
+    // format of config file:
+    // 1. model dimension
+    // 2. number of threads
+    // 3. number of iterations
+    // 4. gamma for Ps
+    // 5. gamma for bias
+    // 6. if random shuffle is enabled
+    // 7. if average is enabled
+    // 8. lambda 2
+    // 9. lambda 3
+    // 10.lambda 4
+    // 11.lambda 5
+    // 12.if bias are enabled
+    // 13.if similarities are enabled
 
-template<int nr_id>
-void TrainOption<nr_id>::exit_train()
-{
-    printf(
-        "usage: libmf train [options] binary_train_file model\n"
-        "\n"
-        "options:\n"
-        "-k <dimensions>: set the number of dimensions (default 40)\n"
-        "-t <iterations>: set the number of iterations (default 40)\n"
-        "-s <number of threads>: set the number of threads (default 4)\n"
-        "-p <cost>: set the regularization cost for P (default 1)\n"
-        "-q <cost>: set the regularization cost for Q (default 1)\n"
-        "-ub <cost>: set the regularization cost for user bias (default 1), set <0 to disable\n"
-        "-ib <cost>: set the regularization cost for item bias (default 1), set <0 to disable\n"
-        "-g <gamma>: set the learning rate for parallel SGD (default 0.001)\n"
-        "-v <path>: set the path to validation set\n"
-        "-blk <blocks>: set the number of blocks for parallel SGD (default 2s x 2s)\n"
-        "    For example, if you want 3x4 blocks, then use '-blk 3x4'\n"
-        "--rand-shuffle --no-rand-shuffle: enable / disable random suffle (default disabled)\n"
-        "    This options should be used when the data is imbalanced.\n"
-        "--tr-rmse --no-tr-rmse: enable / disable show rmse on training data (default disabled)\n"
-        "    This option shows the estimated RMSE on training data. It also slows down the training procedure.\n"
-        "--obj --no-obj: enable / disable show objective value (default disabled)\n"
-        "    This option shows the estimated objective value on training data. It also slows down the training procedure.\n"
-        "--use-avg --no-use-avg: enable / disable using training data average (default enabled)\n"
-    );
-    exit(1);
-}
+    std::ifstream fin(argv[2]);
+    if(!fin)
+        return;
 
-template<int nr_id>
-TrainOption<nr_id>::~TrainOption()
-{
-    delete[] model_path;
+    fin >> model->dim
+        >> model->nr_thrs
+        >> model->iter
+        >> model->gammap
+        >> model->gammab
+        >> model->en_rand_shuffle
+        >> model->en_avg;
+
+    for(int i = 0, ij = 0; i < nr_id; ++i)
+    {
+        for(int j = 0; j <= i; ++j, ++ij)
+        {
+            fin >> model->lambda2[ij];
+        }
+    }
+
+    for(int i = 0; i < nr_id; ++i) fin >> model->lambda3[i];
+
+    for(int i = 0, ij = 0; i < nr_id; ++i)
+    {
+        for(int j = 0; j <= i; ++j, ++ij)
+        {
+            fin >> model->lambda4[ij];
+        }
+    }
+
+    for(int i = 0; i < nr_id; ++i) fin >> model->lambda5[i];
+
+    for(int i = 0; i < nr_id; ++i) fin >> model->en_b[i];
+
+    for(int i = 0, ij = 0; i < nr_id; ++i)
+    {
+        for(int j = 0; j <= i; ++j, ++ij)
+        {
+            fin >> model->en_sim[ij];
+        }
+    }
+
+    fin.close();
+
+    for(int i = 0; i < nr_id; ++i) model->nr_gbs[i] = 2 * (model->nr_thrs);
+
+    tr_path = argv[3];
+    va_path = argv[4];
+    sim_prefix = argv[5];
+    model_path = argv[6];
 }
 
 template<int nr_id>
 struct GridMatrix
 {
     int nr_gbs[nr_id],  // number of block for each dimension
-        nr_gbs_a,           // total blocks
+        nr_gbs_a,       // total blocks
         seg[nr_id];
     long nr_rs;         // number of ratings
     Matrix<nr_id> **GMS;// grid matrix
@@ -678,15 +575,6 @@ bool Scheduler<nr_id>::is_terminated()
     return terminated;
 }
 
-//void Scheduler::show() {
-//for(int mx = 0; mx < nr_gubs; mx++) {
-//for(int nx = 0; nx < nr_gibs; nx++) printf("%3d ", nr_jts[mx * nr_gibs + nx]);
-//printf("\n");
-//}
-//printf("\n");
-//fflush(stdout);
-//}
-
 template<int nr_id>
 Scheduler<nr_id>::~Scheduler()
 {
@@ -699,6 +587,9 @@ Scheduler<nr_id>::~Scheduler()
 template<int nr_id>
 void sgd(GridMatrix<nr_id> *TrG, Model<nr_id> *model, Scheduler<nr_id> *scheduler, int tid)
 {
+    //
+    //float minb = 1.0f, maxb = 0.0f;
+    //
     float *P[nr_id];
     float *B[nr_id];
     memcpy(P, model->P, nr_id * sizeof(float*));
@@ -768,22 +659,6 @@ void sgd(GridMatrix<nr_id> *TrG, Model<nr_id> *model, Scheduler<nr_id> *schedule
                 p2[i] = P[i] + r2->id[i] * dim;
                 b2[i] = B[i] + r2->id[i];
             }
-            //_mm_prefetch((const char *)(r), _MM_HINT_T0);
-            //for(int i = 0; i < nr_id; ++i) {
-            //    _mm_prefetch((const char *)(pq[i]), _MM_HINT_T0);
-            //}
-            //if(mx + 7 < nr_rs) {
-            //    _mm_prefetch((const char *)(r + 7), _MM_HINT_T1);
-            //    for(int i = 0; i < nr_id; ++i) {
-            //        _mm_prefetch((const char *)(P[i] + (r + 7)->id[i] * dim), _MM_HINT_T1);
-            //    }
-            //    if(mx + 15 < nr_rs) {
-            //        _mm_prefetch((const char *)(r + 15), _MM_HINT_T2);
-            //        for(int i = 0; i < nr_id; ++i) {
-            //            _mm_prefetch((const char *)(P[i] + (r + 15)->id[i] * dim), _MM_HINT_T2);
-            //        }
-            //    }
-            //}
 
             for(int i = 0; i < nr_id; ++i)                      // (pqi * pqj)
             {
@@ -865,7 +740,15 @@ void sgd(GridMatrix<nr_id> *TrG, Model<nr_id> *model, Scheduler<nr_id> *schedule
                     i2.id[0] = r2->id[i];
                     i2.id[1] = r1->id[j];
 
-                    //float q1, q2;
+                    if(i == j)
+                    {
+                        if(i1.id[0] > i1.id[1])
+                        {
+                            int temp = i1.id[0];
+                            i1.id[0] = i1.id[1];
+                            i1.id[1] = temp;
+                        }
+                    }
 
                     auto it1 = pHash[ij]->find(i1);
                     if(it1 == pHash[ij]->end() && (i != j || i1.id[0] != i1.id[1]))
@@ -993,7 +876,7 @@ void sgd(GridMatrix<nr_id> *TrG, Model<nr_id> *model, Scheduler<nr_id> *schedule
                     XMMp20 = _mm_add_ps(XMMp20, _mm_mul_ps(_mm_load1_ps(&g2e2), XMMsum20));
                     XMMp21 = _mm_add_ps(XMMp21, _mm_mul_ps(_mm_load1_ps(&g2e2), XMMsum21));
 
-                    for(int j = 0; j < nr_id; ++j, ++ij)
+                    for(int j = 0; j <= i ; ++j, ++ij)
                     {
                         if(f[i][j] != 0.0f)
                         {
@@ -1037,7 +920,8 @@ void sgd(GridMatrix<nr_id> *TrG, Model<nr_id> *model, Scheduler<nr_id> *schedule
                     XMMp10 = _mm_add_ps(XMMp10, _mm_mul_ps(_mm_load1_ps(&g2e1), XMMsum10));
                     XMMp20 = _mm_add_ps(XMMp20, _mm_mul_ps(_mm_load1_ps(&g2e2), XMMsum20));
 
-                    for(int j = 0; j < nr_id; ++j, ++ij)
+                    // with bugs
+                    for(int j = 0; j <= i; ++j, ++ij)
                     {
                         if(f[i][j] != 0.0f)
                         {
@@ -1062,17 +946,23 @@ void sgd(GridMatrix<nr_id> *TrG, Model<nr_id> *model, Scheduler<nr_id> *schedule
                 {
                     float l4f1 = 0, l4f2 = 0;
                     int ij = 0;
-                    for(int j = 0; j < nr_id; ++j, ++ij)
+                    for(int j = 0; j <= i; ++j, ++ij)
                     {
                         l4f1 -= lambda4[ij] * f[i][j];
                         l4f2 -= lambda4[ij] * f[j][i];
                     }
                     *(b1[i]) -= gammab * 2 * (-e1 - l4f1 + lambda5[i] * (*(b1[i])));
                     *(b2[i]) -= gammab * 2 * (-e2 - l4f2 + lambda5[i] * (*(b2[i])));
+
+                    //if(*b1[i] > maxb)maxb = *b1[i];
+                    //if(*b2[i] > maxb)maxb = *b2[i];
+                    //if(*b1[i] < minb)minb = *b1[i];
+                    //if(*b2[i] < minb)minb = *b2[i];
                 }
             }
         }
 
+        //std::cout << minb << " " << maxb << std::endl;
         scheduler->put_job(jid, loss);
         scheduler->pause();
         if(scheduler->is_terminated()) break;
@@ -1127,14 +1017,18 @@ template<int nr_id>
 void train(int argc, char **argv)
 {
     // get options from argv
-    Model<nr_id> model;// = new Model<nr_id>;
-    Monitor<nr_id> monitor;// = new Monitor<nr_id>;
+    Model<nr_id> model;
+    Monitor<nr_id> monitor;
     TrainOption<nr_id> option(argc, argv, &model, &monitor);
+
 
     // create model from train matrix
     Matrix<nr_id> Tr(option.tr_path);
     model.initialize(Tr);
     if(model.en_rand_shuffle) model.gen_rand_map();
+
+    // create similarity from file
+    Similarity<nr_id> similarity(option.sim_prefix, model.en_sim);
 
     // create validation matrix
     Matrix<nr_id> *Va = NULL;
@@ -1155,9 +1049,6 @@ void train(int argc, char **argv)
             }
         }
     }
-
-    Similarity<nr_id> similarity;
-    //similarity.generate(10000, 1000);
 
     // shuffle the model
     if(model.en_rand_shuffle) model.shuffle();
