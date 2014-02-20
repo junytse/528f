@@ -1,3 +1,5 @@
+// created by Zhenhua Xie
+// Last modifiy: 2014/2/20
 #pragma once
 
 // Rating record (ids, rating), have no pointer
@@ -602,7 +604,7 @@ Model<nr_id>::~Model()
 }
 
 template<int nr_id>
-float calc_rate(Model<nr_id> *model, Node<nr_id> *r)
+float calc_rate(Model<nr_id> *model, Node<nr_id> *r) // sum(pi*pj), i<j
 {
     float rate = model->avg;
     for(int i = 0; i < nr_id; ++i)

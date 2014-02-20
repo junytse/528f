@@ -1,20 +1,22 @@
+// created by Zhenhua Xie
+// Last modifiy: 2014/2/20
 #include "header.h"
 #include "model.h"
 
 template<int nr_id>
 struct Monitor
 {
-    int iter,               // 迭代次数
-        *nr_tr_srs[nr_id];  // 各维各元素的记录条数
+    int iter,               // times of iteration
+        *nr_tr_srs[nr_id];  // number of record for each id
     float tr_time;
-    bool en_show_tr_rmse,   // 是否显示rmse
-         en_show_obj;       // 是否显示obj
+    bool en_show_tr_rmse,   // if training rmse is shown
+         en_show_obj;       // if obj is shown
     Matrix<nr_id> *Va;      // validation matrix
     Model<nr_id> *model;    // pointer to model
     Monitor();
     void print_header();    // output list header
     void show(float iter_time, double loss, float tr_rmse);     // output list
-    void scan_tr(const Matrix<nr_id> &Tr);                          // 计算nr_tr_srs
+    void scan_tr(const Matrix<nr_id> &Tr);                          // calculate nr_tr_srs
     double calc_reg();      // calculate ||P[i]|| * lambda
     ~Monitor();
 };
@@ -121,7 +123,7 @@ template<int nr_id>
 TrainOption<nr_id>::TrainOption(int argc, char **argv, Model<nr_id> *model, Monitor<nr_id> *monitor)    // train (config file) (input rating data file) (input similarity prefix) (output model file)
     : va_path(NULL), tr_path(NULL), model_path(NULL), sim_prefix(NULL)
 {
-    monitor->en_show_tr_rmse = true;
+    monitor->en_show_tr_rmse = false;
     monitor->en_show_obj = true;
 
     // format of config file:
@@ -196,17 +198,17 @@ struct GridMatrix
 {
     int nr_gbs[nr_id],  // number of block for each dimension
         nr_gbs_a,       // total blocks
-        seg[nr_id];
+        seg[nr_id];     // number of records per block for each dimension
     long nr_rs;         // number of ratings
     Matrix<nr_id> **GMS;// grid matrix
-    std::unordered_map<ArrayIndex<int, 2>, float, Arrayhash<ArrayIndex<int, 2>>, Arrayequal<ArrayIndex<int, 2>>> *sim[(1 + nr_id)*nr_id / 2];
-    //float *sim_avg[(1 + nr_id)*nr_id / 2];
+    std::unordered_map<ArrayIndex<int, 2>, float, Arrayhash<ArrayIndex<int, 2>>, Arrayequal<ArrayIndex<int, 2>>> *sim[(1 + nr_id) * nr_id / 2];
     float sim_avg[(1 + nr_id)*nr_id / 2];
     GridMatrix(const Matrix<nr_id> &R, const Similarity<nr_id> &S, int **map, int *nr_gbs, int nr_thrs);
     static void sort_ratings(Matrix<nr_id> *R, std::mutex *mtx, int *nr_thrs);
     ~GridMatrix();
 };
 
+// bug
 template<int nr_id>
 GridMatrix<nr_id>::GridMatrix(const Matrix<nr_id> &R, const Similarity<nr_id> &S, int **map, int *_nr_gbs, int nr_thrs)
 {
@@ -225,7 +227,6 @@ GridMatrix<nr_id>::GridMatrix(const Matrix<nr_id> &R, const Similarity<nr_id> &S
 
     GMS = new Matrix<nr_id>*[nr_gbs_a];
     nr_rs = R.nr_rs;
-    std::mutex mtx;
 
     // assign counts for blocks
     for(int i = 0; i < nr_id; ++i)
@@ -255,8 +256,6 @@ GridMatrix<nr_id>::GridMatrix(const Matrix<nr_id> &R, const Similarity<nr_id> &S
             sim[ij] = new std::unordered_map<ArrayIndex<int, 2>, float, Arrayhash<ArrayIndex<int, 2>>, Arrayequal<ArrayIndex<int, 2>>>[nr_gbs[i] * nr_gbs[j]];
             sim_avg[ij] = 0.0f;
             num_avg[ij] = 0;
-            //sim_avg[ij] = new float[nr_gbs[i] * nr_gbs[j]];
-            //memset(sim_avg[ij], 0, nr_gbs[i] * nr_gbs[j] * sizeof(float));
         }
     }
 
@@ -273,22 +272,9 @@ GridMatrix<nr_id>::GridMatrix(const Matrix<nr_id> &R, const Similarity<nr_id> &S
                 sim[ij][blkNum][ai] = it->rate;
                 sim_avg[ij] += it->rate;
                 ++num_avg[ij];
-                //sim_avg[ij][blkNum] += it->rate;
             }
         }
     }
-
-    //// get average similarity
-    //for(int i = 0, ij = 0; i < nr_id; ++i) {
-    //    for(int j = 0; j <= i; ++j, ++ij) {
-    //        for(int blk = 0, nr; blk < nr_gbs[i] * nr_gbs[j]; ++blk) {
-    //            nr = sim[ij][blk].size();
-    //            if(nr > 0) {
-    //                sim_avg[ij][blk] /= nr;
-    //            }
-    //        }
-    //    }
-    //}
 
     for(int i = 0, ij = 0; i < nr_id; ++i)
     {
@@ -319,47 +305,40 @@ GridMatrix<nr_id>::GridMatrix(const Matrix<nr_id> &R, const Similarity<nr_id> &S
             idx += new_id[j] / seg[j];
         }
         GMS[idx]->M[r_map[idx]] = R.M[i];  // deep copy
-        memcpy(GMS[idx]->M[r_map[idx]].id, new_id, nr_id * sizeof(int));
-        //for(int j = 0; j < nr_id; ++j) {
-        //GMS[idx]->M[r_map[idx]].id[j] = new_id[j];
-        //}
         ++r_map[idx];
     }
     delete[] r_map;
 
 // sort ratings for each grid if it is shuffled (multi thread)
-    //if(map[0]) {
-    //    int nr_alive_thrs = 0;
-    //    for(int i = 0; i < nr_gbs_a; ++i) {
-    //        while(nr_alive_thrs >= nr_thrs) {
-    //            std::this_thread::sleep_for(std::chrono::milliseconds(1));
-    //            continue;
-    //        }
-    //        {
-    //            std::lock_guard<std::mutex> lock(mtx);
-    //            nr_alive_thrs++;
-    //        }
-    //        std::thread worker = std::thread(GridMatrix::sort_ratings, GMS[i], &mtx, &nr_alive_thrs);
-    //        worker.detach();
-    //    }
-    //    while(nr_alive_thrs != 0) {
-    //        std::this_thread::sleep_for(std::chrono::milliseconds(1));
-    //        continue;
-    //    }
-    //}
+    std::mutex mtx;
+    if(map[0])
+    {
+        int nr_alive_thrs = 0;
+        for(int i = 0; i < nr_gbs_a; ++i)
+        {
+            while(nr_alive_thrs >= nr_thrs)
+            {
+                std::this_thread::sleep_for(std::chrono::milliseconds(1));
+                continue;
+            }
+            {
+                std::lock_guard<std::mutex> lock(mtx);
+                nr_alive_thrs++;
+            }
+            std::thread worker = std::thread(GridMatrix::sort_ratings, GMS[i], &mtx, &nr_alive_thrs);
+            worker.detach();
+        }
+        while(nr_alive_thrs != 0)
+        {
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+            continue;
+        }
+    }
 
 
 
     printf("done. %.2f\n", clock.toc());
     fflush(stdout);
-//if(EN_SHOW_GRID) {    // cannot show grid in multidimension
-//printf("\n");
-//for(int mx = 0; mx < nr_gubs; mx++) {
-//for(int nx = 0; nx < nr_gibs; nx++) printf("%7ld ", GMS[mx * nr_gibs + nx]->nr_rs);
-//printf("\n");
-//}
-//printf("\n");
-//}
 }
 
 // multithread
@@ -386,7 +365,6 @@ GridMatrix<nr_id>::~GridMatrix()
         for(int j = 0; j <= i; ++j, ++ij)
         {
             delete[] sim[ij];
-            //delete[] sim_avg[ij];
         }
     }
 }
@@ -418,15 +396,12 @@ public:
     void resume();                      // shuffle the jobs and set paused = false
     void terminate();                   // set terminated = true
     bool is_terminated();               // return terminated
-    //void show();
     ~Scheduler();
 };
 
 template<int nr_id>
 Scheduler<nr_id>::Scheduler(int *_nr_gbs, int _nr_thrs) : nr_gbs_a(1), nr_jts(NULL), order(NULL), losses(NULL), nr_thrs(_nr_thrs), total_jobs(0), nr_paused_thrs(0), paused(false), terminated(false)
 {
-    //blocked = new bool*[nr_id];
-    //nr_gbs = new int[nr_id];
     for(int i = 0; i < nr_id; ++i)
     {
         nr_gbs[i] = _nr_gbs[i];
@@ -459,14 +434,14 @@ int Scheduler<nr_id>::get_job()
             {
                 int nx = order[mx];
                 blocked_flag = false;
-                for(int i = nr_id - 1; i >= 0; --i)
+                for(int i = nr_id - 1, j = nx; i >= 0; --i)
                 {
-                    if(blocked[i][nx % nr_gbs[i]])
+                    if(blocked[i][j % nr_gbs[i]])
                     {
                         blocked_flag = true;
                         break;
                     }
-                    nx /= nr_gbs[i];
+                    j /= nr_gbs[i];
                 }
                 if(blocked_flag)continue;
                 if(nr_jts[nx] < ts) ts = nr_jts[nx], jid = nx;
@@ -480,10 +455,10 @@ int Scheduler<nr_id>::get_job()
     // lock up current jid and return
     {
         std::lock_guard<std::mutex> lock(mtx);
-        for(int i = nr_id - 1, jid1 = jid; i >= 0; --i)
+        for(int i = nr_id - 1, j = jid; i >= 0; --i)
         {
-            blocked[i][jid1 % nr_gbs[i]] = true;
-            jid1 /= nr_gbs[i];
+            blocked[i][j % nr_gbs[i]] = true;
+            j /= nr_gbs[i];
         }
         ++nr_jts[jid];
     }
@@ -494,10 +469,10 @@ template<int nr_id>
 void Scheduler<nr_id>::put_job(int jid, double loss)
 {
     std::lock_guard<std::mutex> lock(mtx);
-    for(int i = nr_id - 1, jid1 = jid; i >= 0; --i)
+    for(int i = nr_id - 1, j = jid; i >= 0; --i)
     {
-        blocked[i][jid1 % nr_gbs[i]] = false;
-        jid1 /= nr_gbs[i];
+        blocked[i][j % nr_gbs[i]] = false;
+        j /= nr_gbs[i];
     }
     losses[jid] = loss;
     total_jobs++;
@@ -587,9 +562,6 @@ Scheduler<nr_id>::~Scheduler()
 template<int nr_id>
 void sgd(GridMatrix<nr_id> *TrG, Model<nr_id> *model, Scheduler<nr_id> *scheduler, int tid)
 {
-    //
-    //float minb = 1.0f, maxb = 0.0f;
-    //
     float *P[nr_id];
     float *B[nr_id];
     memcpy(P, model->P, nr_id * sizeof(float*));
@@ -636,20 +608,27 @@ void sgd(GridMatrix<nr_id> *TrG, Model<nr_id> *model, Scheduler<nr_id> *schedule
         jid = scheduler->get_job();
         r1 = TrG->GMS[jid]->M;
         nr_rs = TrG->GMS[jid]->nr_rs;
-        //__m128d XMMl = _mm_setzero_pd();
-        loss = 0;
+        loss = 0.0f;
+
+        int blk_id[nr_id];
+        for(int i = nr_id - 1, j = jid; i >= 0; --i)
+        {
+            blk_id[i] = j % TrG->nr_gbs[i];
+            j /= TrG->nr_gbs[i];
+        }
 
         for(int i = 0, ij = 0; i < nr_id; ++i)
         {
             for(int j = 0; j <= i; ++j, ++ij)
             {
-                pHash[ij] = &TrG->sim[ij][jid];
+                pHash[ij] = &TrG->sim[ij][blk_id[i] * TrG->nr_gbs[j] + blk_id[j]];
             }
         }
 
         for(mx = 0; mx < nr_rs - 1; mx += 2, r1 += 2)                       // 每次更新一个分数记录: P[id[0~(nr_id-1)]], loss
         {
             r2 = r1 + 1;
+
             __m128 XMMpsum1 = _mm_setzero_ps();
             __m128 XMMpsum2 = _mm_setzero_ps();
             for(int i = 0; i < nr_id; ++i)
@@ -719,7 +698,6 @@ void sgd(GridMatrix<nr_id> *TrG, Model<nr_id> *model, Scheduler<nr_id> *schedule
             e1 = r1->rate - e1 - avg;
             e2 = r2->rate - e2 - avg;
 
-            //double esum = e1 * e1 + e2 * e2;
             loss += e1 * e1 + e2 * e2;
 
             float f[nr_id][nr_id];
@@ -735,6 +713,8 @@ void sgd(GridMatrix<nr_id> *TrG, Model<nr_id> *model, Scheduler<nr_id> *schedule
                         continue;
                     }
                     ArrayIndex<int, 2> i1, i2;
+                    //i1.id[0] = 437;
+                    //i1.id[1] = 365;
                     i1.id[0] = r1->id[i];
                     i1.id[1] = r2->id[j];
                     i2.id[0] = r2->id[i];
@@ -844,6 +824,36 @@ void sgd(GridMatrix<nr_id> *TrG, Model<nr_id> *model, Scheduler<nr_id> *schedule
                     }
                 }
             }
+
+            //float gammap2 = gammap * 2;
+            //float y2e1 = gammap2 * e1;
+            //float y2e2 = gammap2 * e2;
+            //float *psum1 = new float[dim];
+            //float *psum2 = new float[dim];
+            //memset(psum1, 0, sizeof(float)*dim);
+            //memset(psum2, 0, sizeof(float)*dim);
+            //for(int i = 0; i < dim; ++i)
+            //{
+            //    for(int j = 0; j < nr_id; ++j)
+            //    {
+            //        psum1[i] += p1[j][i];
+            //        psum2[i] += p2[j][i];
+            //    }
+            //    psum1[i] *= y2e1;
+            //    psum2[i] *= y2e2;
+            //}
+            //for(int i = 0; i < nr_id; ++i)
+            //{
+            //    for(int j = 0; j < dim; ++j)
+            //    {
+            //        p1[i][j] = p1[i][j] * (1 - y2e1) + psum1[j];
+            //        p2[i][j] = p2[i][j] * (1 - y2e2) + psum2[j];
+            //    }
+            //}
+            //delete[] psum1;
+            //delete[] psum2;
+
+
             // update
             float gammap2 = gammap * 2;
             for(dx = 0; dx < dim - 7; dx += 8)
@@ -920,7 +930,6 @@ void sgd(GridMatrix<nr_id> *TrG, Model<nr_id> *model, Scheduler<nr_id> *schedule
                     XMMp10 = _mm_add_ps(XMMp10, _mm_mul_ps(_mm_load1_ps(&g2e1), XMMsum10));
                     XMMp20 = _mm_add_ps(XMMp20, _mm_mul_ps(_mm_load1_ps(&g2e2), XMMsum20));
 
-                    // with bugs
                     for(int j = 0; j <= i; ++j, ++ij)
                     {
                         if(f[i][j] != 0.0f)
@@ -953,16 +962,10 @@ void sgd(GridMatrix<nr_id> *TrG, Model<nr_id> *model, Scheduler<nr_id> *schedule
                     }
                     *(b1[i]) -= gammab * 2 * (-e1 - l4f1 + lambda5[i] * (*(b1[i])));
                     *(b2[i]) -= gammab * 2 * (-e2 - l4f2 + lambda5[i] * (*(b2[i])));
-
-                    //if(*b1[i] > maxb)maxb = *b1[i];
-                    //if(*b2[i] > maxb)maxb = *b2[i];
-                    //if(*b1[i] < minb)minb = *b1[i];
-                    //if(*b2[i] < minb)minb = *b2[i];
                 }
             }
         }
 
-        //std::cout << minb << " " << maxb << std::endl;
         scheduler->put_job(jid, loss);
         scheduler->pause();
         if(scheduler->is_terminated()) break;
@@ -994,7 +997,6 @@ void gsgd(GridMatrix<nr_id> *TrG, Model<nr_id> *model, Monitor<nr_id> *monitor)
             scheduler->pause_sgd();
             float iter_time = clock.toc();
             double loss = scheduler->get_loss();
-            //if (EN_SHOW_SCHED) scheduler->show();
             monitor->show(iter_time, loss, (float)sqrt(loss / TrG->nr_rs)); // rmse = sqrt(loss / nr_rs)
             iter++;
             clock.tic();

@@ -1,3 +1,5 @@
+// created by Zhenhua Xie
+// Last modifiy: 2014/2/20
 #include "header.h"
 using namespace std;
 
@@ -21,7 +23,8 @@ void generate(int argc, char **argv)    // generate (config file) (output rating
     }
     int nr_rs, nr_s[nr_id];
     int nr_sim[(1 + nr_id)*nr_id / 2];
-    float ratelimit;
+    //float ratelimit;
+    int ratelimit;
     fin >> nr_rs;
     fin >> ratelimit;
     for(int i = 0; i < nr_id; ++i)fin >> nr_s[i];
@@ -58,7 +61,8 @@ void generate(int argc, char **argv)    // generate (config file) (output rating
             {
                 fout << record.id[j] << "\t";
             }
-            fout << ratelimit * (float)drand48() << endl;
+            fout << rand() % ratelimit << endl;
+            //fout << ratelimit * (float)drand48() << endl;
         }
     }
     fout.close();

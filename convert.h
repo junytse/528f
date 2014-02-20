@@ -1,20 +1,27 @@
+// created by Zhenhua Xie
+// Last modifiy: 2014/2/20
 #include "header.h"
 #include "model.h"
 
-struct ConvertOption {
+struct ConvertOption
+{
     char *src, *dst;
     ConvertOption(int argc, char **argv);
     static void exit_convert();
     ~ConvertOption();
 };
 
-ConvertOption::ConvertOption(int argc, char **argv) {
+ConvertOption::ConvertOption(int argc, char **argv)
+{
     if(argc != 3 && argc != 4) exit_convert();
     src = argv[2];
-    if(argc == 4) {
+    if(argc == 4)
+    {
         dst = new char[strlen(argv[3]) + 1];
         sprintf(dst, "%s", argv[3]);
-    } else {
+    }
+    else
+    {
         char *p = strrchr(argv[2], '/');
         if(p == NULL) p = argv[2];
         else p++;
@@ -23,7 +30,8 @@ ConvertOption::ConvertOption(int argc, char **argv) {
     }
 }
 
-void ConvertOption::exit_convert() {
+void ConvertOption::exit_convert()
+{
     printf(
         "usage: libmf convert text_file binary_file\n"
         "\n"
@@ -32,12 +40,14 @@ void ConvertOption::exit_convert() {
     exit(1);
 }
 
-ConvertOption::~ConvertOption() {
+ConvertOption::~ConvertOption()
+{
     delete[] dst;
 }
 
 template<int nr_id>
-void convert(char *src_path, char *dst_path) {
+void convert(char *src_path, char *dst_path)
+{
     printf("Converting %s... ", src_path);
     fflush(stdout);
     Clock clock;
@@ -48,9 +58,11 @@ void convert(char *src_path, char *dst_path) {
     double sum = 0;
     std::vector<Node<nr_id>> rs;
     Node<nr_id> r;
-    while(fscanf(f, "%d", &r.id[0]) != EOF) {
+    while(fscanf(f, "%d", &r.id[0]) != EOF)
+    {
         if(r.id[0] + 1 > nr_s[0])nr_s[0] = r.id[0] + 1;
-        for(int i = 1; i < nr_id; ++i) {
+        for(int i = 1; i < nr_id; ++i)
+        {
             fscanf(f, "%d", &r.id[i]);
             if(r.id[i] + 1 > nr_s[i])nr_s[i] = r.id[i] + 1;
         }
@@ -71,7 +83,8 @@ void convert(char *src_path, char *dst_path) {
 }
 
 template<int nr_id>
-void convert(int argc, char **argv) {
+void convert(int argc, char **argv)
+{
     printf("%d\n", nr_id);
     ConvertOption option(argc, argv);
     convert<nr_id>(option.src, option.dst);

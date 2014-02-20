@@ -1,3 +1,5 @@
+// created by Zhenhua Xie
+// Last modifiy: 2014/2/20
 #pragma once
 #pragma warning(disable:4996)
 
@@ -32,76 +34,93 @@ const bool EN_SHOW_GRID = false;
 
 enum FileType { DATA, MODEL };
 
-struct Clock {
+struct Clock
+{
     clock_t begin, end;
     void tic();
     float toc();
 };
 
-void Clock::tic() {
+void Clock::tic()
+{
     begin = clock();
 }
 
-float Clock::toc() {
+float Clock::toc()
+{
     end = clock();
     return (float)(end - begin) / CLOCKS_PER_SEC;
 }
 
 static unsigned long long seed = 1;
-double drand48(void) {
+double drand48(void)
+{
     const unsigned long long a = 0x5DEECE66DLL, c = 0xB16, m = 0x100000000LL;
     seed = (a * seed + c) & 0xFFFFFFFFFFFFLL;
     unsigned int x = unsigned(seed >> 16);
     return((double)x / (double)m);
 }
 
-void srand48(unsigned int i) {
+void srand48(unsigned int i)
+{
+    srand(i);
     seed = (((long long int) i) << 16) | rand();
 }
 
-void exit_file_error(char *path) {
+void exit_file_error(char *path)
+{
     fprintf(stderr, "\nError: Invalid file name %s.\n", path);
     exit(1);
 }
 
-void exit_file_ver(float current_ver, float file_ver) {
+void exit_file_ver(float current_ver, float file_ver)
+{
     fprintf(stderr, "\nError: Inconsistent file version.\n");
     fprintf(stderr, "current version:%.2f    file version:%.2f\n", current_ver, file_ver);
     exit(1);
 }
 
 template<typename _TYPE, std::size_t _LENGTH>
-class ArrayIndex {
+class ArrayIndex
+{
 public:
     _TYPE id[_LENGTH];
     ArrayIndex() {}
-    ArrayIndex(const _TYPE(&lhs)[_LENGTH]) {
+    ArrayIndex(const _TYPE(&lhs)[_LENGTH])
+    {
         memcpy(this, lhs, sizeof(ArrayIndex));
     }
-    ArrayIndex(const ArrayIndex &lhs) {
+    ArrayIndex(const ArrayIndex &lhs)
+    {
         memcpy(this, &lhs, sizeof(ArrayIndex));
     }
-    ArrayIndex& operator = (ArrayIndex &lhs) {
+    ArrayIndex& operator = (ArrayIndex &lhs)
+    {
         memcpy(this, &lhs, sizeof(ArrayIndex));
         return *this;
     }
-    bool operator == (const ArrayIndex &lhs) const {
+    bool operator == (const ArrayIndex &lhs) const
+    {
         for(int i = 0; i < _LENGTH - 1; ++i)if(id[i] != lhs.id[i])return false;
         return id[_LENGTH - 1] == lhs.id[_LENGTH - 1];
     }
 };
 
 template<typename _TYPE>
-struct Arrayhash : std::unary_function<_TYPE, std::size_t> {
-    std::size_t operator()(const _TYPE &lhs) const {
+struct Arrayhash : std::unary_function<_TYPE, std::size_t>
+{
+    std::size_t operator()(const _TYPE &lhs) const
+    {
         const std::size_t SEED = static_cast<size_t>(0xc70f6907UL);
         return _Hash_bytes(&lhs, sizeof(_TYPE), SEED);
     }
 };
 
 template<typename _TYPE>
-struct Arrayequal : std::binary_function<_TYPE, _TYPE, bool> {
-    bool operator()(const _TYPE &lhs, const _TYPE &rhs) const {
+struct Arrayequal : std::binary_function<_TYPE, _TYPE, bool>
+{
+    bool operator()(const _TYPE &lhs, const _TYPE &rhs) const
+    {
         return lhs == rhs;
     }
 };
@@ -120,7 +139,8 @@ struct Arrayequal : std::binary_function<_TYPE, _TYPE, bool> {
 //}
 
 inline std::size_t
-unaligned_load(const char* p) {
+unaligned_load(const char* p)
+{
     std::size_t result;
     memcpy(&result, p, sizeof(result));
     return result;
@@ -128,7 +148,8 @@ unaligned_load(const char* p) {
 
 // Loads n bytes, where 1 <= n < 8.
 inline std::size_t
-load_bytes(const char* p, int n) {
+load_bytes(const char* p, int n)
+{
     std::size_t result = 0;
     --n;
     do
@@ -138,13 +159,15 @@ load_bytes(const char* p, int n) {
 }
 
 inline std::size_t
-shift_mix(std::size_t v) {
+shift_mix(std::size_t v)
+{
     return v ^ (v >> 47);
 }
 
 // Implementation of Murmur hash for 64-bit size_t.
 size_t
-_Hash_bytes(const void* ptr, std::size_t len, std::size_t seed) {
+_Hash_bytes(const void* ptr, std::size_t len, std::size_t seed)
+{
     static const std::size_t mul = (((size_t)0xc6a4a793UL) << 32UL)
                                    + (size_t)0x5bd1e995UL;
     const char* const buf = static_cast<const char*>(ptr);
@@ -154,12 +177,14 @@ _Hash_bytes(const void* ptr, std::size_t len, std::size_t seed) {
     const int len_aligned = len & ~0x7;
     const char* const end = buf + len_aligned;
     std::size_t hash = seed ^ (len * mul);
-    for(const char* p = buf; p != end; p += 8) {
+    for(const char* p = buf; p != end; p += 8)
+    {
         const std::size_t data = shift_mix(unaligned_load(p) * mul) * mul;
         hash ^= data;
         hash *= mul;
     }
-    if((len & 0x7) != 0) {
+    if((len & 0x7) != 0)
+    {
         const std::size_t data = load_bytes(end, len & 0x7);
         hash ^= data;
         hash *= mul;
