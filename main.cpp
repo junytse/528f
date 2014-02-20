@@ -26,7 +26,7 @@ int main(int argc, char **argv)
     if(!strcmp(argv[1], "generate"))generate<3>(argc, argv);
     else if(!strcmp(argv[1], "convert")) convert<3>(argc, argv);
     else if(!strcmp(argv[1], "train")) train<3>(argc, argv);
-    else if(!strcmp(argv[1], "predict")) predict<3>(argc, argv);
+    //else if(!strcmp(argv[1], "predict")) predict<3>(argc, argv);
     //else if (!strcmp(argv[1], "view")) view(argc, argv);
     //else printf("Invalid command: %s\n", argv[1]);
 

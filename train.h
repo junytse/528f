@@ -208,7 +208,6 @@ struct GridMatrix
     ~GridMatrix();
 };
 
-// bug
 template<int nr_id>
 GridMatrix<nr_id>::GridMatrix(const Matrix<nr_id> &R, const Similarity<nr_id> &S, int **map, int *_nr_gbs, int nr_thrs)
 {
@@ -1069,8 +1068,8 @@ void train(int argc, char **argv)
     // inverse shuffle
     if(model.en_rand_shuffle) model.inv_shuffle();
 
-    // output model
-    model.write(option.model_path);
+    //// output model(暂时不可用)
+    //model.write(option.model_path);
 
     if(NULL != Va)delete Va;
 }
