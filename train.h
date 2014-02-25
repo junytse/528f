@@ -194,6 +194,8 @@ TrainOption<nr_id>::TrainOption(int argc, char **argv, Model<nr_id> *model, Moni
 
     fin.close();
 
+    memcpy(model->en_sim, similarity->en_sim, (sizeof(bool)) * (1 + nr_id) * nr_id / 2);
+
     for(int i = 0; i < nr_id; ++i) model->nr_gbs[i] = 2 * (model->nr_thrs);
 
     tr_path = argv[3];
@@ -1043,7 +1045,14 @@ void train(int argc, char **argv)
     if(model.en_rand_shuffle) model.gen_rand_map();
 
     // create similarity from file
-    similarity.read(option.sim_prefix, model.map_f);
+    if(model.en_rand_shuffle)
+    {
+        similarity.read(option.sim_prefix, model.map_f);
+    }
+    else
+    {
+        similarity.read(option.sim_prefix);
+    }
 
     // create validation matrix
     Matrix<nr_id> *Va = NULL;

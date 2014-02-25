@@ -49,9 +49,9 @@ struct Similarity
     bool en_sim[(1 + nr_id)*nr_id / 2];
     bool en_sim_avg[(1 + nr_id)*nr_id / 2];
     Similarity();
-    Similarity(char *path, int **map = NULL);
+    //Similarity(char *path, int **map = NULL);
     //Similarity(char *path, bool *_en_sim, int **map = NULL);
-    void read(char *path, int **map);
+    void read(char *path, int **map = NULL);
 };
 
 template<int nr_id>
@@ -221,15 +221,15 @@ Matrix<nr_id>::~Matrix()
 template<int nr_id>
 Similarity<nr_id>::Similarity() {}
 
-template<int nr_id>
-Similarity<nr_id>::Similarity(char *path, int **map = NULL)
-{
-    //memcpy(en_sim, _en_sim, (sizeof(bool)) * (1 + nr_id) * nr_id / 2);
-    read(path, map);
-}
+//template<int nr_id>
+//Similarity<nr_id>::Similarity(char *path, int **map = NULL)
+//{
+//memcpy(en_sim, _en_sim, (sizeof(bool)) * (1 + nr_id) * nr_id / 2);
+//read(path, map);
+//}
 
 template<int nr_id>
-void Similarity<nr_id>::read(char *path, int **map)
+void Similarity<nr_id>::read(char *path, int **map = NULL)
 {
     std::stringstream filename;
     Node<2> node;
