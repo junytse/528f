@@ -47,8 +47,10 @@ struct Similarity
 {
     std::vector<Node<2>> M[(1 + nr_id)*nr_id / 2];
     bool en_sim[(1 + nr_id)*nr_id / 2];
+    bool en_sim_avg[(1 + nr_id)*nr_id / 2];
     Similarity();
-    Similarity(char *path, bool *_en_sim, int **map = NULL);
+    Similarity(char *path, int **map = NULL);
+    //Similarity(char *path, bool *_en_sim, int **map = NULL);
     void read(char *path, int **map);
 };
 
@@ -220,9 +222,9 @@ template<int nr_id>
 Similarity<nr_id>::Similarity() {}
 
 template<int nr_id>
-Similarity<nr_id>::Similarity(char *path, bool *_en_sim, int **map = NULL)
+Similarity<nr_id>::Similarity(char *path, int **map = NULL)
 {
-    memcpy(en_sim, _en_sim, (sizeof(bool)) * (1 + nr_id) * nr_id / 2);
+    //memcpy(en_sim, _en_sim, (sizeof(bool)) * (1 + nr_id) * nr_id / 2);
     read(path, map);
 }
 

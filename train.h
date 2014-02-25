@@ -116,11 +116,11 @@ template<int nr_id>
 struct TrainOption
 {
     char *tr_path, *va_path, *sim_prefix, *model_path;
-    TrainOption(int argc, char **argv, Model<nr_id> *model, Monitor<nr_id> *monitor);
+    TrainOption(int argc, char **argv, Model<nr_id> *model, Monitor<nr_id> *monitor, Similarity<nr_id> *similarity);
 };
 
 template<int nr_id>
-TrainOption<nr_id>::TrainOption(int argc, char **argv, Model<nr_id> *model, Monitor<nr_id> *monitor)    // train (config file) (input rating data file) (input similarity prefix) (output model file)
+TrainOption<nr_id>::TrainOption(int argc, char **argv, Model<nr_id> *model, Monitor<nr_id> *monitor, Similarity<nr_id> *similarity)   // train (config file) (input rating data file) (input similarity prefix) (output model file)
     : va_path(NULL), tr_path(NULL), model_path(NULL), sim_prefix(NULL)
 {
     monitor->en_show_tr_rmse = false;
@@ -140,6 +140,7 @@ TrainOption<nr_id>::TrainOption(int argc, char **argv, Model<nr_id> *model, Moni
     // 11.lambda 5
     // 12.if bias are enabled
     // 13.if similarities are enabled
+    // 14.if similarities average are enabled
 
     std::ifstream fin(argv[2]);
     if(!fin)
@@ -179,7 +180,15 @@ TrainOption<nr_id>::TrainOption(int argc, char **argv, Model<nr_id> *model, Moni
     {
         for(int j = 0; j <= i; ++j, ++ij)
         {
-            fin >> model->en_sim[ij];
+            fin >> similarity->en_sim[ij];
+        }
+    }
+
+    for(int i = 0, ij = 0; i < nr_id; ++i)
+    {
+        for(int j = 0; j <= i; ++j, ++ij)
+        {
+            fin >> similarity->en_sim_avg[ij];
         }
     }
 
@@ -279,9 +288,13 @@ GridMatrix<nr_id>::GridMatrix(const Matrix<nr_id> &R, const Similarity<nr_id> &S
     {
         for(int j = 0; j <= i; ++j, ++ij)
         {
-            if(num_avg[ij] > 0)
+            if(S.en_sim_avg[ij] && num_avg[ij] > 0)
             {
                 sim_avg[ij] /= num_avg[ij];
+            }
+            else
+            {
+                sim_avg[ij] = 0.0f;
             }
         }
     }
@@ -1020,7 +1033,8 @@ void train(int argc, char **argv)
     // get options from argv
     Model<nr_id> model;
     Monitor<nr_id> monitor;
-    TrainOption<nr_id> option(argc, argv, &model, &monitor);
+    Similarity<nr_id> similarity;
+    TrainOption<nr_id> option(argc, argv, &model, &monitor, &similarity);
 
 
     // create model from train matrix
@@ -1029,7 +1043,7 @@ void train(int argc, char **argv)
     if(model.en_rand_shuffle) model.gen_rand_map();
 
     // create similarity from file
-    Similarity<nr_id> similarity(option.sim_prefix, model.en_sim);
+    similarity.read(option.sim_prefix, model.map_f);
 
     // create validation matrix
     Matrix<nr_id> *Va = NULL;
